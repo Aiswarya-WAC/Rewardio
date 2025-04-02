@@ -3,6 +3,8 @@ from django.db import models
 from django.contrib.auth.models import User
 import uuid
 from authentication.models import Shop
+from django.db import models
+from authentication.models import Shop
 
 
 class PurchaseRule(models.Model):
@@ -66,3 +68,31 @@ class DirectReward(models.Model):
     def __str__(self):
         return f"Direct Reward: {self.reward_type.reward_name} for {self.shop.shop_name} with {self.points} points for customer {self.customer.customer_id}"
 
+
+# ___________________________________________________ rewards wallet section ________________________________________
+
+# models.py
+from django.db import models
+from authentication.models import Shop
+
+
+
+class Wallet(models.Model):
+    customer = models.OneToOneField(Customer, on_delete=models.CASCADE, related_name='wallet')
+    shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name='wallets')
+    points = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Wallet for {self.customer.customer_id} at {self.shop.shop_name}: {self.points} points"
+
+class WalletTransaction(models.Model):
+    wallet = models.ForeignKey(Wallet, on_delete=models.CASCADE, related_name='transactions')
+    points = models.IntegerField()  # Points provided by developer
+    amount = models.DecimalField(max_digits=10, decimal_places=2)  # Amount provided by developer
+    description = models.CharField(max_length=255)  # Description provided by developer
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.points} points for {self.amount} - {self.description}"

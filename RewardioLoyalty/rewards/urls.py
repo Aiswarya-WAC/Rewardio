@@ -1,6 +1,6 @@
 from django.urls import path
 from .views import CreateAndUpdatePurchaseRuleView, CreateAndUpdateCurrencyConversionView, CreateAndUpdateRewardTypeView, CreateAndUpdateDirectRewardView, GetAllRulesView
-
+from . import views 
 urlpatterns = [
     path('create-purchase-rule/', CreateAndUpdatePurchaseRuleView.as_view(), name='create-purchase-rule'),
     path('update-purchase-rule/<int:rule_id>/', CreateAndUpdatePurchaseRuleView.as_view(), name='update-purchase-rule'),
@@ -15,4 +15,6 @@ urlpatterns = [
     path('update-direct-reward/<int:direct_reward_id>/', CreateAndUpdateDirectRewardView.as_view(), name='update-direct-reward'),
     
     path('all-rules/', GetAllRulesView.as_view(), name='get-all-rules'),
+    
+    path('add-wallet-points/', views.AddWalletPointsView.as_view(), name='add_wallet_points'),
 ]

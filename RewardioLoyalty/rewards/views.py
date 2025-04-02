@@ -31,7 +31,7 @@ class CreateAndUpdatePurchaseRuleView(APIView):
         if PurchaseRule.objects.filter(
             shop=shop,
             min_purchase_amount__lt=max_amount,  # New rule's min is less than existing max
-            max_purchase_amount__gt=min_amount   # New rule's max is greater than existing min
+            max_purchase_amount__gt=min_amount    # New rule's max is greater than existing min
         ).exists():
             return Response({"error": "Overlapping purchase rule exists."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -117,6 +117,7 @@ class CreateAndUpdateCurrencyConversionView(APIView):
         currency_conversion.points_per_currency = request.data.get("points_per_currency", currency_conversion.points_per_currency)
         currency_conversion.save()
         return Response(CurrencyConversionSerializer(currency_conversion).data, status=status.HTTP_200_OK)
+
 
 class CreateAndUpdateRewardTypeView(APIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -210,3 +211,86 @@ class GetAllRulesView(APIView):
             "reward_types": RewardTypeSerializer(RewardType.objects.all(), many=True).data
         }
         return Response(response_data, status=status.HTTP_200_OK)
+
+
+# ___________________________________________________ rewards wallet section ________________________________________
+
+
+# views.py
+from rest_framework import status
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from django.db import transaction
+from authentication.models import Shop
+from .models import Customer, Wallet, WalletTransaction
+from .serializers import WalletSerializer
+
+class AddWalletPointsView(APIView):
+    def post(self, request):
+        # Extract the developer's JSON payload
+        customer_id = request.data.get("customer_id")
+        api_key = request.data.get("api_key")
+        amount = request.data.get("amount")
+        points = request.data.get("points")
+        description = request.data.get("description", "Points added via API")
+
+        # Validate required fields
+        if not all([customer_id, api_key, amount, points]):
+            return Response(
+                {"error": "customer_id, api_key, amount, and points are required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Validate numeric fields
+        try:
+            amount = float(amount)
+            points = int(points)
+            if amount <= 0 or points < 0:
+                raise ValueError("Amount must be positive and points cannot be negative")
+        except ValueError as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Verify shop using api_key
+        try:
+            shop = Shop.objects.get(api_key=api_key)
+        except Shop.DoesNotExist:
+            return Response(
+                {"error": "Invalid API key"},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+
+        # Atomic transaction to ensure data consistency
+        with transaction.atomic():
+            # Get or create customer
+            customer, _ = Customer.objects.get_or_create(
+                customer_id=customer_id,
+                defaults={"shop": shop}
+            )
+
+            # Get or create wallet
+            wallet, created = Wallet.objects.get_or_create(
+                customer=customer,
+                defaults={"shop": shop, "points": 0}
+            )
+
+            # Add points from payload to wallet
+            wallet.points += points
+            wallet.save()
+
+            # Store transaction with all provided data
+            WalletTransaction.objects.create(
+                wallet=wallet,
+                points=points,
+                amount=amount,
+                description=description
+            )
+
+            # Serialize and return wallet data
+            serializer = WalletSerializer(wallet)
+            return Response({
+                "message": "Data added to wallet successfully.",
+                "wallet": serializer.data
+            }, status=status.HTTP_200_OK)
