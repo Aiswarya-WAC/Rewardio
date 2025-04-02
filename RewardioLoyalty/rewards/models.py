@@ -71,24 +71,14 @@ class DirectReward(models.Model):
 
 # ___________________________________________________ rewards wallet section ________________________________________
 
-# models.py
-# models.py
+# models.py (add to existing file)
 from django.db import models
 from authentication.models import Shop
-
-class Customer(models.Model):
-    customer_id = models.CharField(max_length=36, unique=True)
-    shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name='customers')
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    def __str__(self):
-        return f"Customer {self.customer_id}"
 
 class Wallet(models.Model):
     customer = models.OneToOneField(Customer, on_delete=models.CASCADE, related_name='wallet')
     shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name='wallets')
-    points = models.IntegerField(default=0)
+    points = models.IntegerField(default=0)  # Total points accumulated
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -97,9 +87,10 @@ class Wallet(models.Model):
 
 class WalletTransaction(models.Model):
     wallet = models.ForeignKey(Wallet, on_delete=models.CASCADE, related_name='transactions')
-    points = models.IntegerField()  # Positive for credit
-    description = models.CharField(max_length=255)
+    amount = models.DecimalField(max_digits=10, decimal_places=2)  # Purchase amount from developer
+    points = models.IntegerField()  # Points calculated from PurchaseRule
+    description = models.CharField(max_length=255, default="Purchase processed via API")
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"{self.points} points - {self.description}"
+        return f"{self.points} points for {self.amount} - {self.description}"

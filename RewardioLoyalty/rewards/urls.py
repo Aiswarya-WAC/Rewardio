@@ -16,5 +16,6 @@ urlpatterns = [
     
     path('all-rules/', GetAllRulesView.as_view(), name='get-all-rules'),
     
-    path('add-wallet-points/', views.AddWalletPointsView.as_view(), name='add_wallet_points'),
+    path('process-purchase-wallet/', views.ProcessPurchaseWalletView.as_view(), name='process_purchase_wallet'),
+    path('view-wallet-details/', views.ViewWalletDetailsView.as_view(), name='view_wallet_details'),
 ]

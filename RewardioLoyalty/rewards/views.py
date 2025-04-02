@@ -8,7 +8,7 @@ from .serializers import (
     PurchaseRuleSerializer, CurrencyConversionSerializer, 
     RewardTypeSerializer, DirectRewardSerializer
 )
-
+from .serializers import WalletSerializer
 class CreateAndUpdatePurchaseRuleView(APIView):
     permission_classes = [permissions.IsAuthenticated]  # Assuming you want authentication
 
@@ -214,41 +214,33 @@ class GetAllRulesView(APIView):
 
 
 # ___________________________________________________ rewards wallet section ________________________________________
-
-
-# views.py
+# views.py (add to existing file)
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.db import transaction
 from authentication.models import Shop
-from .models import Customer, Wallet, WalletTransaction
-from .serializers import WalletSerializer
+from .models import Customer, PurchaseRule, Wallet, WalletTransaction
 
-class AddWalletPointsView(APIView):
-    # No permissions.IsAuthenticated; using api_key for auth instead
-
+class ProcessPurchaseWalletView(APIView):
     def post(self, request):
-        # Extract payload from developer's request
+        # Extract the e-commerce developer's JSON payload
         customer_id = request.data.get("customer_id")
         api_key = request.data.get("api_key")
         amount = request.data.get("amount")
-        points = request.data.get("points")
-        description = request.data.get("description", "Points added via API")  # Optional
 
         # Validate required fields
-        if not all([customer_id, api_key, amount, points]):
+        if not all([customer_id, api_key, amount]):
             return Response(
-                {"error": "customer_id, api_key, amount, and points are required"},
+                {"error": "customer_id, api_key, and amount are required"},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Validate numeric fields
+        # Validate amount
         try:
             amount = float(amount)
-            points = int(points)
-            if amount <= 0 or points < 0:
-                raise ValueError("Amount must be positive and points cannot be negative")
+            if amount <= 0:
+                raise ValueError("Amount must be positive")
         except ValueError as e:
             return Response(
                 {"error": str(e)},
@@ -269,29 +261,60 @@ class AddWalletPointsView(APIView):
             # Get or create customer
             customer, _ = Customer.objects.get_or_create(
                 customer_id=customer_id,
-                defaults={"shop": shop}
+                defaults={"shop": shop}  # Assuming Customer has a shop field
             )
 
             # Get or create wallet
             wallet, created = Wallet.objects.get_or_create(
                 customer=customer,
-                defaults={"shop": shop, "points": 0}
+                shop=shop,
+                defaults={"points": 0}
             )
 
-            # Update wallet with points from payload
+            # Calculate points based on PurchaseRule
+            purchase_rule = PurchaseRule.objects.filter(
+                shop=shop,
+                min_purchase_amount__lte=amount,
+                max_purchase_amount__gte=amount
+            ).first()
+
+            points = purchase_rule.points if purchase_rule else 0
+
+            # Update wallet with calculated points
             wallet.points += points
             wallet.save()
 
-            # Record transaction
+            # Store transaction with provided amount and calculated points
             WalletTransaction.objects.create(
                 wallet=wallet,
+                amount=amount,
                 points=points,
-                description=f"Purchase of {amount} - {description}"
+                description="Purchase processed via API"
             )
 
-            # Serialize and return wallet data
+            # Return only a success message
+            return Response(
+                {"message": f"Purchase processed successfully. {points} points allocated."},
+                status=status.HTTP_200_OK
+            )
+            
+class ViewWalletDetailsView(APIView):
+    permission_classes = [permissions.IsAuthenticated]  # Only you can access this
+
+    def get(self, request):
+        customer_id = request.query_params.get("customer_id")
+        if not customer_id:
+            return Response(
+                {"error": "customer_id is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            wallet = Wallet.objects.get(customer__customer_id=customer_id)
             serializer = WalletSerializer(wallet)
-            return Response({
-                "message": f"Added {points} points for purchase of {amount}.",
-                "wallet": serializer.data
-            }, status=status.HTTP_200_OK)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Wallet.DoesNotExist:
+            return Response(
+                {"error": "Wallet not found for this customer"},
+                status=status.HTTP_404_NOT_FOUND
+            )
