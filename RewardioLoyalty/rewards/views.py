@@ -226,13 +226,15 @@ from .models import Customer, Wallet, WalletTransaction
 from .serializers import WalletSerializer
 
 class AddWalletPointsView(APIView):
+    # No permissions.IsAuthenticated; using api_key for auth instead
+
     def post(self, request):
-        # Extract the developer's JSON payload
+        # Extract payload from developer's request
         customer_id = request.data.get("customer_id")
         api_key = request.data.get("api_key")
         amount = request.data.get("amount")
         points = request.data.get("points")
-        description = request.data.get("description", "Points added via API")
+        description = request.data.get("description", "Points added via API")  # Optional
 
         # Validate required fields
         if not all([customer_id, api_key, amount, points]):
@@ -276,21 +278,20 @@ class AddWalletPointsView(APIView):
                 defaults={"shop": shop, "points": 0}
             )
 
-            # Add points from payload to wallet
+            # Update wallet with points from payload
             wallet.points += points
             wallet.save()
 
-            # Store transaction with all provided data
+            # Record transaction
             WalletTransaction.objects.create(
                 wallet=wallet,
                 points=points,
-                amount=amount,
-                description=description
+                description=f"Purchase of {amount} - {description}"
             )
 
             # Serialize and return wallet data
             serializer = WalletSerializer(wallet)
             return Response({
-                "message": "Data added to wallet successfully.",
+                "message": f"Added {points} points for purchase of {amount}.",
                 "wallet": serializer.data
             }, status=status.HTTP_200_OK)
