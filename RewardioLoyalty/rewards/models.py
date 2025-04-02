@@ -2,21 +2,8 @@ from django.db import models
 from django.db import models
 from django.contrib.auth.models import User
 import uuid
+from authentication.models import Shop
 
-class vendor(models.Model):
-    User = models.OneToOneField(User,on_delete=models.CASCADE,related_name='vendor_profile')
-    owner_name  = models.CharField(max_length=100)
-    
-    
-class Shop(models.Model):
-    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='shops')
-    name = models.CharField(max_length=255)
-    api_key = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
-    secret_key = models.UUIDField(default=uuid.uuid4, editable=False)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    def __str__(self):
-        return self.name
 
 class PurchaseRule(models.Model):
     shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name='purchase_rules')  # Shop-specific rule
@@ -59,13 +46,23 @@ class DirectReward(models.Model):
     def __str__(self):
         return f"Direct Reward: {self.reward_type.reward_name} for {self.shop.shop_name} with {self.points} points"
 
+class Customer(models.Model):
+    customer_id = models.CharField(max_length=36, unique=True)
+    shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name='customers')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
+    def __str__(self):
+        return f"Customer {self.customer_id}"
+    
 class DirectReward(models.Model):
     reward_type = models.ForeignKey(RewardType, on_delete=models.CASCADE, related_name='direct_rewards')  # Link to RewardType
     shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name='direct_rewards')  # Link to Shop
+    customer = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name='direct_rewards')  # Link to Customer
     points = models.IntegerField()  # Points assigned for this direct reward
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"Direct Reward: {self.reward_type.reward_name} for {self.shop.shop_name} with {self.points} points"
+        return f"Direct Reward: {self.reward_type.reward_name} for {self.shop.shop_name} with {self.points} points for customer {self.customer.customer_id}"
+

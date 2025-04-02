@@ -2,9 +2,11 @@ from rest_framework import serializers
 from .models import PurchaseRule, CurrencyConversion, RewardType, Shop
 
 class PurchaseRuleSerializer(serializers.ModelSerializer):
+    shop_id = serializers.PrimaryKeyRelatedField(source='shop', read_only=True)
+
     class Meta:
         model = PurchaseRule
-        fields = ['id', 'shop', 'min_purchase_amount', 'max_purchase_amount', 'points', 'created_at', 'updated_at']
+        fields = ['id', 'shop_id', 'min_purchase_amount', 'max_purchase_amount', 'points']
 
 class CurrencyConversionSerializer(serializers.ModelSerializer):
     class Meta:
@@ -22,11 +24,14 @@ class ShopSerializer(serializers.ModelSerializer):
         fields = ['id', 'vendor', 'shop_name', 'api_key', 'created_at']
 
 from .models import DirectReward, RewardType, Shop
+from rest_framework import serializers
+from .models import DirectReward, RewardType, Shop, Customer
 
 class DirectRewardSerializer(serializers.ModelSerializer):
     reward_type = serializers.StringRelatedField()  # Show reward type name
     shop = serializers.StringRelatedField()  # Show shop name
+    customer = serializers.StringRelatedField()  # Show customer id
 
     class Meta:
         model = DirectReward
-        fields = ['id', 'reward_type', 'shop', 'points', 'created_at', 'updated_at']
+        fields = ['id', 'reward_type', 'shop', 'customer', 'points', 'created_at', 'updated_at']
