@@ -19,5 +19,7 @@ urlpatterns = [
     path('process-purchase-wallet/', views.ProcessPurchaseWalletView.as_view(), name='process_purchase_wallet'),
     path('view-wallet-details/', views.ViewWalletDetailsView.as_view(), name='view_wallet_details'),
     
-    path('view-tansaction-details/',views.ViewWalletTransactionsView.as_view(), name ='view-transaction-details')
+    path('view-tansaction-details/',views.ViewWalletTransactionsView.as_view(), name ='view-transaction-details'),
+    path('generate-code/', views.GenerateCodeView.as_view(), name='generate_code'),
+    path('redeem-code/', views.RedeemCodeView.as_view(), name='redeem_code'),
 ]

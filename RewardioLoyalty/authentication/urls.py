@@ -29,3 +29,8 @@ urlpatterns = [
     path('shops/', ShopView.as_view(), name='shops'),
     path('shops/<int:pk>/', ShopDetailView.as_view(), name='shop_detail'),
 ]
+
+
+
+
+

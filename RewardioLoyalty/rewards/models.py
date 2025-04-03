@@ -5,22 +5,21 @@ import uuid
 from authentication.models import Shop
 from django.db import models
 from authentication.models import Shop
+from django.db import models
+from authentication.models import Shop
 
 
 class PurchaseRule(models.Model):
-    shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name='purchase_rules')  # Shop-specific rule
+    shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name='purchase_rules')
     min_purchase_amount = models.DecimalField(max_digits=10, decimal_places=2)
     max_purchase_amount = models.DecimalField(max_digits=10, decimal_places=2)
     points = models.IntegerField()
+    redeemable = models.BooleanField(default=False)
+    redeemable_shops = models.ManyToManyField(Shop, related_name='rules_redeemable_in', blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        ordering = ['min_purchase_amount']
 
     def __str__(self):
-        return f"Rule for {self.shop.shop_name}: {self.min_purchase_amount}-{self.max_purchase_amount} => {self.points} points"
-
+        return f"{self.points} points for {self.min_purchase_amount}-{self.max_purchase_amount} in {self.shop}"
 class CurrencyConversion(models.Model):
     shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name='currency_conversions')
     currency = models.CharField(max_length=10)
@@ -49,13 +48,11 @@ class DirectReward(models.Model):
         return f"Direct Reward: {self.reward_type.reward_name} for {self.shop.shop_name} with {self.points} points"
 
 class Customer(models.Model):
-    customer_id = models.CharField(max_length=36, unique=True)
-    shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name='customers')
+    customer_id = models.CharField(max_length=100, unique=True)
     created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"Customer {self.customer_id}"
+        return self.customer_id
     
 class DirectReward(models.Model):
     reward_type = models.ForeignKey(RewardType, on_delete=models.CASCADE, related_name='direct_rewards')  
@@ -72,25 +69,32 @@ class DirectReward(models.Model):
 # ___________________________________________________ rewards wallet section ________________________________________
 
 
-from django.db import models
-from authentication.models import Shop
+
 
 class Wallet(models.Model):
-    customer = models.OneToOneField(Customer, on_delete=models.CASCADE, related_name='wallet')
+    customer = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name='wallets')
     shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name='wallets')
-    points = models.IntegerField(default=0)  
+    purchase_points = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    class Meta:
+        unique_together = ('customer', 'shop')
+
     def __str__(self):
-        return f"Wallet for {self.customer.customer_id} at {self.shop.shop_name}: {self.points} points"
+        return f"Wallet for {self.customer.customer_id} at {self.shop.name}"
 
 class WalletTransaction(models.Model):
     wallet = models.ForeignKey(Wallet, on_delete=models.CASCADE, related_name='transactions')
-    amount = models.DecimalField(max_digits=10, decimal_places=2) 
-    points = models.IntegerField() 
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    points = models.IntegerField()
+    redeemable = models.BooleanField(default=False)
+    code = models.CharField(max_length=50, unique=True, null=True, blank=True)
+    is_redeemed = models.BooleanField(default=False)
+    redeemed_at_shop = models.ForeignKey(Shop, on_delete=models.SET_NULL, null=True, blank=True, related_name='redeemed_transactions')
     description = models.CharField(max_length=255, default="Purchase processed via API")
     created_at = models.DateTimeField(auto_now_add=True)
+    
 
     def __str__(self):
         return f"{self.points} points for {self.amount} - {self.description}"
