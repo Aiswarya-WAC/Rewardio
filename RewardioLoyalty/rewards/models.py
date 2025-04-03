@@ -58,10 +58,10 @@ class Customer(models.Model):
         return f"Customer {self.customer_id}"
     
 class DirectReward(models.Model):
-    reward_type = models.ForeignKey(RewardType, on_delete=models.CASCADE, related_name='direct_rewards')  # Link to RewardType
-    shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name='direct_rewards')  # Link to Shop
-    customer = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name='direct_rewards')  # Link to Customer
-    points = models.IntegerField()  # Points assigned for this direct reward
+    reward_type = models.ForeignKey(RewardType, on_delete=models.CASCADE, related_name='direct_rewards')  
+    shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name='direct_rewards')  
+    customer = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name='direct_rewards')  
+    points = models.IntegerField()  
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -71,14 +71,14 @@ class DirectReward(models.Model):
 
 # ___________________________________________________ rewards wallet section ________________________________________
 
-# models.py (add to existing file)
+
 from django.db import models
 from authentication.models import Shop
 
 class Wallet(models.Model):
     customer = models.OneToOneField(Customer, on_delete=models.CASCADE, related_name='wallet')
     shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name='wallets')
-    points = models.IntegerField(default=0)  # Total points accumulated
+    points = models.IntegerField(default=0)  
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -87,8 +87,8 @@ class Wallet(models.Model):
 
 class WalletTransaction(models.Model):
     wallet = models.ForeignKey(Wallet, on_delete=models.CASCADE, related_name='transactions')
-    amount = models.DecimalField(max_digits=10, decimal_places=2)  # Purchase amount from developer
-    points = models.IntegerField()  # Points calculated from PurchaseRule
+    amount = models.DecimalField(max_digits=10, decimal_places=2) 
+    points = models.IntegerField() 
     description = models.CharField(max_length=255, default="Purchase processed via API")
     created_at = models.DateTimeField(auto_now_add=True)
 

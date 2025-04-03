@@ -3,10 +3,14 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.db.models import Q
 from authentication.models import Shop
-from .models import PurchaseRule, CurrencyConversion, RewardType, DirectReward,Customer
+from .models import (
+    PurchaseRule, CurrencyConversion, RewardType, 
+    DirectReward,Customer ,PurchaseRule, Wallet, WalletTransaction
+)
+from django.db import transaction
 from .serializers import (
     PurchaseRuleSerializer, CurrencyConversionSerializer, 
-    RewardTypeSerializer, DirectRewardSerializer
+    RewardTypeSerializer, DirectRewardSerializer,WalletTransactionSerializer
 )
 from .serializers import WalletSerializer
 class CreateAndUpdatePurchaseRuleView(APIView):
@@ -214,29 +218,21 @@ class GetAllRulesView(APIView):
 
 
 # ___________________________________________________ rewards wallet section ________________________________________
-# views.py (add to existing file)
-from rest_framework import status
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from django.db import transaction
-from authentication.models import Shop
-from .models import Customer, PurchaseRule, Wallet, WalletTransaction
 
 class ProcessPurchaseWalletView(APIView):
     def post(self, request):
-        # Extract the e-commerce developer's JSON payload
+
         customer_id = request.data.get("customer_id")
         api_key = request.data.get("api_key")
         amount = request.data.get("amount")
 
-        # Validate required fields
         if not all([customer_id, api_key, amount]):
             return Response(
                 {"error": "customer_id, api_key, and amount are required"},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Validate amount
+ 
         try:
             amount = float(amount)
             if amount <= 0:
@@ -247,7 +243,7 @@ class ProcessPurchaseWalletView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Verify shop using api_key
+
         try:
             shop = Shop.objects.get(api_key=api_key)
         except Shop.DoesNotExist:
@@ -256,22 +252,21 @@ class ProcessPurchaseWalletView(APIView):
                 status=status.HTTP_401_UNAUTHORIZED
             )
 
-        # Atomic transaction to ensure data consistency
         with transaction.atomic():
-            # Get or create customer
+
             customer, _ = Customer.objects.get_or_create(
                 customer_id=customer_id,
-                defaults={"shop": shop}  # Assuming Customer has a shop field
+                defaults={"shop": shop}  
             )
 
-            # Get or create wallet
+
             wallet, created = Wallet.objects.get_or_create(
                 customer=customer,
                 shop=shop,
                 defaults={"points": 0}
             )
 
-            # Calculate points based on PurchaseRule
+
             purchase_rule = PurchaseRule.objects.filter(
                 shop=shop,
                 min_purchase_amount__lte=amount,
@@ -280,11 +275,9 @@ class ProcessPurchaseWalletView(APIView):
 
             points = purchase_rule.points if purchase_rule else 0
 
-            # Update wallet with calculated points
             wallet.points += points
             wallet.save()
 
-            # Store transaction with provided amount and calculated points
             WalletTransaction.objects.create(
                 wallet=wallet,
                 amount=amount,
@@ -292,14 +285,13 @@ class ProcessPurchaseWalletView(APIView):
                 description="Purchase processed via API"
             )
 
-            # Return only a success message
             return Response(
                 {"message": f"Purchase processed successfully. {points} points allocated."},
                 status=status.HTTP_200_OK
             )
             
 class ViewWalletDetailsView(APIView):
-    permission_classes = [permissions.IsAuthenticated]  # Only you can access this
+    permission_classes = [permissions.IsAuthenticated]  
 
     def get(self, request):
         customer_id = request.query_params.get("customer_id")
@@ -318,3 +310,33 @@ class ViewWalletDetailsView(APIView):
                 {"error": "Wallet not found for this customer"},
                 status=status.HTTP_404_NOT_FOUND
             )
+            
+class ViewWalletTransactionsView(APIView):
+    permission_classes = [permissions.IsAuthenticated]  # Only you can access
+
+    def get(self, request):
+        customer_id = request.query_params.get("customer_id")
+        if not customer_id:
+            return Response(
+                {"error": "customer_id is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            wallet = Wallet.objects.get(customer__customer_id=customer_id)
+            transactions = wallet.transactions.all()  # Get all transactions
+            serializer = WalletTransactionSerializer(transactions, many=True)
+            return Response({
+                "customer_id": customer_id,
+                "transactions": serializer.data
+            }, status=status.HTTP_200_OK)
+        except Wallet.DoesNotExist:
+            return Response(
+                {"error": "Wallet not found for this customer"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+            
+            
+# ___________________________________________________Multi shop section   ________________________________________
+
+

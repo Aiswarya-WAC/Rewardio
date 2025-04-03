@@ -39,8 +39,6 @@ class DirectRewardSerializer(serializers.ModelSerializer):
 
 # ___________________________________________________ rewards wallet section ________________________________________
 
-# serializers.py (add to existing file)
-# serializers.py (add to existing file)
 from rest_framework import serializers
 from .models import Wallet, WalletTransaction
 
@@ -51,9 +49,12 @@ class WalletTransactionSerializer(serializers.ModelSerializer):
 
 class WalletSerializer(serializers.ModelSerializer):
     customer = serializers.StringRelatedField()
-    shop = serializers.StringRelatedField()
-    transactions = WalletTransactionSerializer(many=True, read_only=True)
-
     class Meta:
         model = Wallet
-        fields = ['id', 'customer', 'shop', 'points', 'created_at', 'updated_at', 'transactions']
+        fields = ['id', 'customer','points', 'created_at', 'updated_at']
+        
+        
+class WalletTransactionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = WalletTransaction
+        fields = ['id', 'amount', 'points', 'description', 'created_at']

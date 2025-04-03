@@ -18,4 +18,6 @@ urlpatterns = [
     
     path('process-purchase-wallet/', views.ProcessPurchaseWalletView.as_view(), name='process_purchase_wallet'),
     path('view-wallet-details/', views.ViewWalletDetailsView.as_view(), name='view_wallet_details'),
+    
+    path('view-tansaction-details/',views.ViewWalletTransactionsView.as_view(), name ='view-transaction-details')
 ]
