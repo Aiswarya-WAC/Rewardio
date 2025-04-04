@@ -48,6 +48,7 @@ class DirectReward(models.Model):
         return f"Direct Reward: {self.reward_type.reward_name} for {self.shop.shop_name} with {self.points} points"
 
 class Customer(models.Model):
+    shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name='customers')
     customer_id = models.CharField(max_length=100, unique=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
