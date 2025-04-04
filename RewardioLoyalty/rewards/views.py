@@ -1,21 +1,30 @@
-from rest_framework import status, permissions
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from django.db.models import Q
-from authentication.models import Shop
+from datetime import timedelta
 import random
 import string
 from django.db import transaction
-from .models import (
-    PurchaseRule, CurrencyConversion, RewardType, 
-    DirectReward,Customer ,PurchaseRule, Wallet, WalletTransaction
-)
+import uuid
+import requests
 from django.db import transaction
+from django.db.models import Count, Q
+from django.utils import timezone
+from django.utils.timezone import now
+
+from rest_framework import status, permissions
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from authentication.models import Shop
+from .models import (
+    PurchaseRule, CurrencyConversion, RewardCondition, RewardType, 
+    DirectReward, Customer, Wallet, WalletTransaction, ShopRewardLimit
+)
 from .serializers import (
     PurchaseRuleSerializer, CurrencyConversionSerializer, 
-    RewardTypeSerializer, DirectRewardSerializer,WalletTransactionSerializer
+    RewardConditionSerializer, RewardTypeSerializer, 
+    DirectRewardSerializer, WalletTransactionSerializer, WalletSerializer
 )
-from .serializers import WalletSerializer
+
 
 
 
@@ -30,9 +39,9 @@ class CreateAndUpdatePurchaseRuleView(APIView):
         redeemable = request.data.get("redeemable", False)
         redeemable_shops_ids = request.data.get("redeemable_shops", [])
         expiration_days = request.data.get("expiration_days")
-        discount_percentage = request.data.get("discount_percentage")  
+        discount_percentage = request.data.get("discount_percentage")  # New field
 
-
+        # Step 1: Validate required fields
         required_fields = {
             "shop_id": shop_id,
             "min_purchase_amount": min_amount,
@@ -46,7 +55,7 @@ class CreateAndUpdatePurchaseRuleView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-
+        # Step 2: Validate numeric fields
         try:
             shop_id = int(shop_id)
             min_amount = float(min_amount)
@@ -58,7 +67,7 @@ class CreateAndUpdatePurchaseRuleView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-
+        # Validate ranges and non-negative values
         if min_amount < 0 or max_amount < 0 or points < 0:
             return Response(
                 {"error": "min_purchase_amount, max_purchase_amount, and points must be non-negative"},
@@ -70,7 +79,7 @@ class CreateAndUpdatePurchaseRuleView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-
+        # Validate expiration_days if provided
         if expiration_days is not None:
             try:
                 expiration_days = int(expiration_days)
@@ -85,7 +94,7 @@ class CreateAndUpdatePurchaseRuleView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-
+        # Validate discount_percentage if redeemable
         if redeemable:
             if discount_percentage is None:
                 return Response(
@@ -105,9 +114,9 @@ class CreateAndUpdatePurchaseRuleView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
         else:
-            discount_percentage = None  
+            discount_percentage = None  # Ensure it's null if not redeemable
 
-
+        # Step 3: Validate shop ownership
         try:
             shop = Shop.objects.get(id=shop_id)
             if shop.owner != request.user:
@@ -121,7 +130,7 @@ class CreateAndUpdatePurchaseRuleView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
 
-
+        # Step 4: Check for overlapping rules
         overlapping_rules = PurchaseRule.objects.filter(
             shop=shop,
             min_purchase_amount__lt=max_amount,
@@ -152,7 +161,7 @@ class CreateAndUpdatePurchaseRuleView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-
+        # Step 5: Validate redeemable shops if provided
         if redeemable and redeemable_shops_ids:
             try:
                 redeemable_shops_ids = [int(shop_id) for shop_id in redeemable_shops_ids]
@@ -172,7 +181,7 @@ class CreateAndUpdatePurchaseRuleView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-
+        # Step 6: Create the purchase rule
         try:
             with transaction.atomic():
                 purchase_rule = PurchaseRule.objects.create(
@@ -195,12 +204,13 @@ class CreateAndUpdatePurchaseRuleView(APIView):
                 {"error": f"Failed to create purchase rule: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-            
 
 class CreateAndUpdateCurrencyConversionView(APIView):
+    """API endpoints for managing currency conversion rules for points calculation."""
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
+        """Create a new currency conversion rule for a shop."""
         shop_id = request.data.get("shop_id")
         try:
             shop = Shop.objects.get(id=shop_id)
@@ -213,6 +223,7 @@ class CreateAndUpdateCurrencyConversionView(APIView):
         return Response(CurrencyConversionSerializer(currency_conversion).data, status=status.HTTP_201_CREATED)
 
     def put(self, request, conversion_id):
+        """Update an existing currency conversion rule."""
         try:
             currency_conversion = CurrencyConversion.objects.get(id=conversion_id)
         except CurrencyConversion.DoesNotExist:
@@ -224,82 +235,312 @@ class CreateAndUpdateCurrencyConversionView(APIView):
         return Response(CurrencyConversionSerializer(currency_conversion).data, status=status.HTTP_200_OK)
 
 
-class CreateAndUpdateRewardTypeView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+class RewardConditionView(APIView):
+    """API endpoints for managing reward conditions that define constraints on rewards."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, condition_id=None):
+        """List all reward conditions or retrieve a specific one."""
+        if condition_id:
+            try:
+                condition = RewardCondition.objects.get(id=condition_id)
+                serializer = RewardConditionSerializer(condition)
+                return Response(serializer.data, status=status.HTTP_200_OK)
+            except RewardCondition.DoesNotExist:
+                return Response({"error": "Condition not found"}, status=status.HTTP_404_NOT_FOUND)
+        conditions = RewardCondition.objects.all()
+        serializer = RewardConditionSerializer(conditions, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
     def post(self, request):
-        reward_type = RewardType.objects.create(
-            reward_name=request.data.get("reward_name"), description=request.data.get("description")
-        )
-        return Response(RewardTypeSerializer(reward_type).data, status=status.HTTP_201_CREATED)
+        """Create a new reward condition."""
+        serializer = RewardConditionSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    def put(self, request, reward_type_id):
+    def put(self, request, condition_id):
+        """Update an existing reward condition."""
         try:
-            reward_type = RewardType.objects.get(id=reward_type_id)
+            condition = RewardCondition.objects.get(id=condition_id)
+        except RewardCondition.DoesNotExist:
+            return Response({"error": "Condition not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = RewardConditionSerializer(condition, data=request.data, partial=True)  # Allow partial updates
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, condition_id):
+        """Delete a reward condition."""
+        try:
+            condition = RewardCondition.objects.get(id=condition_id)
+            condition.delete()
+            return Response({"message": "Condition deleted successfully"}, status=status.HTTP_204_NO_CONTENT)
+        except RewardCondition.DoesNotExist:
+            return Response({"error": "Condition not found"}, status=status.HTTP_404_NOT_FOUND)
+
+
+class RewardTypeView(APIView):
+    """API endpoints for managing reward types."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, reward_id=None):
+        """List all reward types or retrieve a specific one."""
+        if reward_id:
+            try:
+                reward = RewardType.objects.get(id=reward_id)
+                serializer = RewardTypeSerializer(reward)
+                return Response(serializer.data, status=status.HTTP_200_OK)
+            except RewardType.DoesNotExist:
+                return Response({"error": "Reward type not found"}, status=status.HTTP_404_NOT_FOUND)
+        
+        rewards = RewardType.objects.all()
+        serializer = RewardTypeSerializer(rewards, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        """Create a new reward type with a unique UUID."""
+        request.data["reward_uuid"] = str(uuid.uuid4())  
+        serializer = RewardTypeSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def put(self, request, reward_id):
+        """Update an existing reward type."""
+        try:
+            reward = RewardType.objects.get(id=reward_id)
         except RewardType.DoesNotExist:
-            return Response({"error": "Reward Type not found"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "Reward type not found"}, status=status.HTTP_404_NOT_FOUND)
+        
+        serializer = RewardTypeSerializer(reward, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        reward_type.reward_name = request.data.get("reward_name", reward_type.reward_name)
-        reward_type.description = request.data.get("description", reward_type.description)
-        reward_type.save()
-        return Response(RewardTypeSerializer(reward_type).data, status=status.HTTP_200_OK)
+    def delete(self, request, reward_id):
+        """Delete a reward type."""
+        try:
+            reward = RewardType.objects.get(id=reward_id)
+            reward.delete()
+            return Response({"message": "Reward type deleted successfully"}, status=status.HTTP_204_NO_CONTENT)
+        except RewardType.DoesNotExist:
+            return Response({"error": "Reward type not found"}, status=status.HTTP_404_NOT_FOUND)
 
 
-class CreateAndUpdateDirectRewardView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+class DirectRewardView(APIView):
+    """API for assigning direct rewards to customers with various constraints."""
+    permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        shop_id = request.data.get("shop_id")
-        reward_type_id = request.data.get("reward_type_id")
-        customer_id = request.data.get("customer_id")  
-        points = request.data.get("points")
+        """Assign a direct reward and update wallet points with constraints."""
+        shop_api_key = request.data.get("shop_api_key")
+        reward_uuid = request.data.get("reward_uuid")
+        customer_id = request.data.get("customer_id")
+        points = int(request.data.get("points", 0))
 
-        if not customer_id:  
-            return Response({"error": "Customer ID is required"}, status=status.HTTP_400_BAD_REQUEST)
+        if not (shop_api_key and reward_uuid and customer_id and points > 0):
+            return Response({"error": "Missing or invalid required fields"}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            
-            shop = Shop.objects.get(id=shop_id)
-            reward_type = RewardType.objects.get(id=reward_type_id)
+            shop = Shop.objects.get(api_key=shop_api_key)
+        except Shop.DoesNotExist:
+            return Response({"error": "Invalid shop API key"}, status=status.HTTP_404_NOT_FOUND)
 
-           
-            customer, created = Customer.objects.get_or_create(
-                customer_id=customer_id,
-                defaults={"shop": shop}  
+        shop_limit, _ = ShopRewardLimit.objects.get_or_create(shop=shop)
+
+        if shop_limit.used_points + points > shop_limit.max_points:
+            return Response({"error": "Shop has reached its total reward limit."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            reward_type = RewardType.objects.get(reward_uuid=reward_uuid)
+            reward_condition = reward_type.condition
+        except RewardType.DoesNotExist:
+            return Response({"error": "Invalid reward UUID"}, status=status.HTTP_404_NOT_FOUND)
+
+        customer, _ = Customer.objects.get_or_create(customer_id=customer_id, shop=shop)
+        now = timezone.now()
+
+        previous_rewards = DirectReward.objects.filter(
+            customer=customer,
+            shop=shop,
+            reward_type=reward_type
+        )
+
+        def get_recurring_filter(recurring_type):
+            """Generate filter for recurring reward conditions based on time period."""
+            if recurring_type == "daily":
+                return Q(created_at__date=now.date())
+            elif recurring_type == "weekly":
+                start = now - timedelta(days=now.weekday())
+                end = start + timedelta(days=6)
+                return Q(created_at__date__range=[start.date(), end.date()])
+            elif recurring_type == "monthly":
+                return Q(created_at__year=now.year, created_at__month=now.month)
+            elif recurring_type == "quarterly":
+                quarter = (now.month - 1) // 3 + 1
+                start_month = 3 * (quarter - 1) + 1
+                end_month = start_month + 2
+                return Q(created_at__year=now.year, created_at__month__range=(start_month, end_month))
+            elif recurring_type == "bi_annual":
+                if now.month <= 6:
+                    return Q(created_at__year=now.year, created_at__month__lte=6)
+                else:
+                    return Q(created_at__year=now.year, created_at__month__gte=7)
+            elif recurring_type == "yearly":
+                return Q(created_at__year=now.year)
+            return Q()
+
+        def get_next_recurring_eligible_date(recurring_type):
+            """Calculate next eligible date for recurring rewards."""
+            if recurring_type == "daily":
+                return (now + timedelta(days=1)).date()
+            elif recurring_type == "weekly":
+                start_of_next_week = now + timedelta(days=(7 - now.weekday()))
+                return start_of_next_week.date()
+            elif recurring_type == "monthly":
+                next_month = now.replace(day=1) + timedelta(days=32)
+                return next_month.replace(day=1).date()
+            elif recurring_type == "quarterly":
+                current_quarter = (now.month - 1) // 3 + 1
+                next_quarter_start_month = 3 * current_quarter + 1
+                year = now.year + (1 if next_quarter_start_month > 12 else 0)
+                month = next_quarter_start_month if next_quarter_start_month <= 12 else next_quarter_start_month - 12
+                return timezone.datetime(year, month, 1).date()
+            elif recurring_type == "bi_annual":
+                if now.month <= 6:
+                    return timezone.datetime(now.year, 7, 1).date()
+                else:
+                    return timezone.datetime(now.year + 1, 1, 1).date()
+            elif recurring_type == "yearly":
+                return timezone.datetime(now.year + 1, 1, 1).date()
+            return None
+
+        recurring_filter = get_recurring_filter(reward_condition.recurring_type)
+        recurring_count = previous_rewards.filter(recurring_filter).count()
+
+        if reward_condition.recurring_type != "none" and recurring_count >= 1:
+            next_eligible = get_next_recurring_eligible_date(reward_condition.recurring_type)
+            return Response({
+                "error": f"{reward_condition.recurring_type.title()} reward already used.",
+                "next_eligible_date": str(next_eligible) if next_eligible else None
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if reward_condition.max_usage_per_user:
+            total_given = previous_rewards.count()
+            if total_given >= reward_condition.max_usage_per_user:
+                return Response({"error": "Reward usage limit reached for this user."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if reward_condition.duration_days:
+            recent = previous_rewards.order_by("-created_at").first()
+            if recent and (now - recent.created_at).days < reward_condition.duration_days:
+                next_eligible = recent.created_at.date() + timedelta(days=reward_condition.duration_days)
+                return Response({
+                    "error": f"Reward can be used only once in {reward_condition.duration_days} days.",
+                    "next_eligible_date": str(next_eligible)
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            wallet, _ = Wallet.objects.get_or_create(customer=customer, shop=shop)
+            wallet.points += points
+            wallet.save()
+
+            shop_limit.total_points_used += points
+            shop_limit.used_points += points
+            shop_limit.save()
+
+            direct_reward = DirectReward.objects.create(
+                shop=shop,
+                reward_type=reward_type,
+                customer=customer,
+                points=points
             )
 
-        except (Shop.DoesNotExist, RewardType.DoesNotExist) as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        serializer = DirectRewardSerializer(direct_reward)
+        return Response({
+            "reward": serializer.data,
+            "wallet_balance": wallet.points,
+            "shop_used_points": shop_limit.used_points,
+            "total_points_used": shop_limit.total_points_used
+        }, status=status.HTTP_201_CREATED)
 
-        
-        direct_reward = DirectReward.objects.create(
-            shop=shop,
-            reward_type=reward_type,
-            customer=customer,
-            points=points
-        )
 
-        return Response(DirectRewardSerializer(direct_reward).data, status=status.HTTP_201_CREATED)   
-        
-    def put(self, request, direct_reward_id):
+class SetShopRewardLimitView(APIView):
+    """API for managing shop reward point limits."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        """Set or update the total reward point limit for a shop."""
+        shop_api_key = request.data.get("shop_api_key")
+        max_points = request.data.get("max_points")
+
+        if not (shop_api_key and max_points):
+            return Response({"error": "Missing required fields"}, status=status.HTTP_400_BAD_REQUEST)
+
         try:
-            direct_reward = DirectReward.objects.get(id=direct_reward_id)
-            direct_reward.shop = Shop.objects.get(id=request.data.get("shop_id", direct_reward.shop.id))
-            direct_reward.reward_type = RewardType.objects.get(id=request.data.get("reward_type_id", direct_reward.reward_type.id))
-            direct_reward.customer = Customer.objects.get(customer_id=request.data.get("customer_id", direct_reward.customer.customer_id))  # Updating the customer
-            direct_reward.points = request.data.get("points", direct_reward.points)
-            direct_reward.save()
-        except (DirectReward.DoesNotExist, Shop.DoesNotExist, RewardType.DoesNotExist, Customer.DoesNotExist) as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            shop = Shop.objects.get(api_key=shop_api_key)
+        except Shop.DoesNotExist:
+            return Response({"error": "Invalid shop API key"}, status=status.HTTP_404_NOT_FOUND)
 
-        return Response(DirectRewardSerializer(direct_reward).data, status=status.HTTP_200_OK)
+        shop_limit, _ = ShopRewardLimit.objects.get_or_create(shop=shop)
 
+        max_points = int(max_points)
 
+        
+        shop_limit.total_points_used += shop_limit.used_points 
+        shop_limit.used_points = 0 
+        shop_limit.max_points = max_points
+        shop_limit.save()
+
+        return Response({
+            "shop_id": shop.id,
+            "max_points": shop_limit.max_points,
+            "used_points": shop_limit.used_points,
+            "total_points_used": shop_limit.total_points_used 
+        }, status=status.HTTP_200_OK)
+
+    def put(self, request):
+        """Update the total reward point limit for a shop."""
+        shop_api_key = request.data.get("shop_api_key")
+        new_limit = request.data.get("new_limit")
+
+        if not (shop_api_key and new_limit):
+            return Response({"error": "Missing required fields"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            shop = Shop.objects.get(api_key=shop_api_key)
+        except Shop.DoesNotExist:
+            return Response({"error": "Invalid shop API key"}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            shop_limit = ShopRewardLimit.objects.get(shop=shop)
+            new_limit = int(new_limit)
+
+            shop_limit.total_points_used += shop_limit.used_points  
+            shop_limit.used_points = 0 
+            shop_limit.max_points = new_limit
+            shop_limit.save()
+        except ShopRewardLimit.DoesNotExist:
+            return Response({"error": "Reward limit not set."}, status=status.HTTP_404_NOT_FOUND)
+
+        return Response({
+            "shop_id": shop.id,
+            "max_points": shop_limit.max_points,
+            "total_points_used": shop_limit.total_points_used,
+            "message": "Reward limit updated successfully."
+        }, status=status.HTTP_200_OK)
     
 class GetAllRulesView(APIView):
+    """API endpoint for retrieving all reward-related configurations for a shop."""
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
+        """Get all reward rules and configurations for a shop."""
         shop_id = request.query_params.get("shop_id")
         if not shop_id:
             return Response({"error": "Shop ID is required"}, status=status.HTTP_400_BAD_REQUEST)
