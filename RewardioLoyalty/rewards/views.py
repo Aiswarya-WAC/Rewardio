@@ -1,6 +1,7 @@
 from datetime import timedelta
 import random
 import string
+from django.db import transaction
 import uuid
 import requests
 from django.db import transaction
@@ -37,7 +38,10 @@ class CreateAndUpdatePurchaseRuleView(APIView):
         points = request.data.get("points")
         redeemable = request.data.get("redeemable", False)
         redeemable_shops_ids = request.data.get("redeemable_shops", [])
+        expiration_days = request.data.get("expiration_days")
+        discount_percentage = request.data.get("discount_percentage")  # New field
 
+        # Step 1: Validate required fields
         required_fields = {
             "shop_id": shop_id,
             "min_purchase_amount": min_amount,
@@ -51,6 +55,7 @@ class CreateAndUpdatePurchaseRuleView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        # Step 2: Validate numeric fields
         try:
             shop_id = int(shop_id)
             min_amount = float(min_amount)
@@ -62,6 +67,7 @@ class CreateAndUpdatePurchaseRuleView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        # Validate ranges and non-negative values
         if min_amount < 0 or max_amount < 0 or points < 0:
             return Response(
                 {"error": "min_purchase_amount, max_purchase_amount, and points must be non-negative"},
@@ -73,38 +79,44 @@ class CreateAndUpdatePurchaseRuleView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        try:
-            serializer = PurchaseRuleSerializer(purchase_rule)
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        # Validate expiration_days if provided
+        if expiration_days is not None:
+            try:
+                expiration_days = int(expiration_days)
+                if expiration_days <= 0:
+                    return Response(
+                        {"error": "expiration_days must be a positive integer"},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            except (ValueError, TypeError):
+                return Response(
+                    {"error": "expiration_days must be an integer"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
-        except Shop.DoesNotExist:
-            return Response({"error": "Shop not found"}, status=status.HTTP_400_BAD_REQUEST)
+        # Validate discount_percentage if redeemable
+        if redeemable:
+            if discount_percentage is None:
+                return Response(
+                    {"error": "discount_percentage is required when redeemable is True"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            try:
+                discount_percentage = float(discount_percentage)
+                if not 0 <= discount_percentage <= 100:
+                    return Response(
+                        {"error": "discount_percentage must be between 0 and 100"},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            except (ValueError, TypeError):
+                return Response(
+                    {"error": "discount_percentage must be a number"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        else:
+            discount_percentage = None  # Ensure it's null if not redeemable
 
-
-    def put(self, request, rule_id):
-        """Update an existing purchase rule."""
-        try:
-           
-            purchase_rule = PurchaseRule.objects.get(id=rule_id)
-            purchase_rule.min_purchase_amount = request.data.get("min_purchase_amount", purchase_rule.min_purchase_amount)
-            purchase_rule.max_purchase_amount = request.data.get("max_purchase_amount", purchase_rule.max_purchase_amount)
-            purchase_rule.points = request.data.get("points", purchase_rule.points)
-
-            purchase_rule.save()
-
-            serializer = PurchaseRuleSerializer(purchase_rule)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-
-        except PurchaseRule.DoesNotExist:
-            return Response({"error": "Purchase Rule not found"}, status=status.HTTP_404_NOT_FOUND)
-
-
-class ShopPurchaseRulesView(APIView):
-    """API endpoint to retrieve all purchase rules for a specific shop."""
-    permission_classes = [permissions.IsAuthenticated]
-
-    def get(self, request, shop_id):
-        """Get all purchase rules for a shop."""
+        # Step 3: Validate shop ownership
         try:
             shop = Shop.objects.get(id=shop_id)
             if shop.owner != request.user:
@@ -118,6 +130,7 @@ class ShopPurchaseRulesView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
 
+        # Step 4: Check for overlapping rules
         overlapping_rules = PurchaseRule.objects.filter(
             shop=shop,
             min_purchase_amount__lt=max_amount,
@@ -148,6 +161,7 @@ class ShopPurchaseRulesView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        # Step 5: Validate redeemable shops if provided
         if redeemable and redeemable_shops_ids:
             try:
                 redeemable_shops_ids = [int(shop_id) for shop_id in redeemable_shops_ids]
@@ -167,6 +181,7 @@ class ShopPurchaseRulesView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
+        # Step 6: Create the purchase rule
         try:
             with transaction.atomic():
                 purchase_rule = PurchaseRule.objects.create(
@@ -174,7 +189,9 @@ class ShopPurchaseRulesView(APIView):
                     min_purchase_amount=min_amount,
                     max_purchase_amount=max_amount,
                     points=points,
-                    redeemable=redeemable
+                    redeemable=redeemable,
+                    expiration_days=expiration_days if expiration_days is not None else None,
+                    discount_percentage=discount_percentage
                 )
 
                 if redeemable and redeemable_shops_ids:
@@ -187,7 +204,6 @@ class ShopPurchaseRulesView(APIView):
                 {"error": f"Failed to create purchase rule: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-            
 
 class CreateAndUpdateCurrencyConversionView(APIView):
     """API endpoints for managing currency conversion rules for points calculation."""
@@ -545,7 +561,6 @@ class GetAllRulesView(APIView):
 
 # ___________________________________________________ rewards wallet section ________________________________________
 
-# rewards/views.py
 class ProcessPurchaseWalletView(APIView):
     def generate_code(self, wallet_tx):
         if wallet_tx.code or not wallet_tx.redeemable:
@@ -575,6 +590,9 @@ class ProcessPurchaseWalletView(APIView):
         except Shop.DoesNotExist:
             return Response({"error": "Invalid API key"}, status=401)
 
+        from django.utils import timezone
+        from datetime import timedelta
+
         with transaction.atomic():
             customer, _ = Customer.objects.get_or_create(customer_id=customer_id)
             wallet, created = Wallet.objects.get_or_create(
@@ -591,17 +609,23 @@ class ProcessPurchaseWalletView(APIView):
                 print(f"No rule found for shop {shop.name} (id={shop.id}), amount {amount}")
             points = purchase_rule.points if purchase_rule else 0
             redeemable = purchase_rule.redeemable if purchase_rule else False
+            expiration_days = purchase_rule.expiration_days if purchase_rule else None
             redeemable_shops = [shop.name for shop in purchase_rule.redeemable_shops.all()] if purchase_rule and redeemable else []
 
             wallet.purchase_points += points
             wallet.save()
+
+            expires_at = None
+            if expiration_days is not None:
+                expires_at = timezone.now() + timedelta(days=expiration_days)
 
             wallet_tx = WalletTransaction.objects.create(
                 wallet=wallet,
                 amount=amount,
                 points=points,
                 redeemable=redeemable,
-                description="Purchase processed via API"
+                description="Purchase processed via API",
+                expires_at=expires_at
             )
 
             code = None
@@ -618,7 +642,7 @@ class ProcessPurchaseWalletView(APIView):
             }, status=200)
             
 class ViewWalletDetailsView(APIView):
-    permission_classes = [permissions.IsAuthenticated]  
+    permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
         customer_id = request.query_params.get("customer_id")
@@ -628,6 +652,8 @@ class ViewWalletDetailsView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        from django.utils import timezone
+
         wallets = Wallet.objects.filter(customer__customer_id=customer_id)
         if not wallets.exists():
             return Response(
@@ -635,8 +661,26 @@ class ViewWalletDetailsView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        serializer = WalletSerializer(wallets, many=True) 
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        wallet_data = []
+        total_points = 0
+        for wallet in wallets:
+            expired_points = sum(
+                tx.points for tx in wallet.transactions.filter(expires_at__lt=timezone.now())
+            )
+            available_points = max(wallet.purchase_points - expired_points, 0)
+            wallet_data.append({
+                "id": wallet.id,
+                "customer_id": wallet.customer.customer_id,
+                "shop_name": wallet.shop.name,
+                "purchase_points": available_points
+            })
+            total_points += available_points
+
+        response_data = {
+            "wallets": wallet_data,
+            "total_points": total_points
+        }
+        return Response(response_data, status=status.HTTP_200_OK)
             
 class ViewWalletTransactionsView(APIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -706,23 +750,41 @@ class RedeemCodeView(APIView):
     def post(self, request):
         code = request.data.get("code")
         target_api_key = request.data.get("target_api_key")
+        total_amount = request.data.get("total_amount")
+        customer_id = request.data.get("customer_id")
 
-        if not all([code, target_api_key]):
-            return Response({"error": "code and target_api_key are required"}, status=400)
+        if not all([code, target_api_key, total_amount, customer_id]):
+            return Response(
+                {"error": "code, target_api_key, total_amount, and customer_id are required"},
+                status=400
+            )
 
         try:
-            wallet_tx = WalletTransaction.objects.get(code=code)  # Renamed to avoid conflict
+            total_amount = float(total_amount)
+            if total_amount <= 0:
+                return Response({"error": "total_amount must be positive"}, status=400)
+        except (ValueError, TypeError):
+            return Response({"error": "total_amount must be a number"}, status=400)
+
+
+        try:
+            wallet_tx = WalletTransaction.objects.get(code=code)
             target_shop = Shop.objects.get(api_key=target_api_key)
+            customer = Customer.objects.get(customer_id=customer_id)
         except WalletTransaction.DoesNotExist:
             return Response({"error": "Invalid code"}, status=404)
         except Shop.DoesNotExist:
             return Response({"error": "Invalid target API key"}, status=401)
+        except Customer.DoesNotExist:
+            return Response({"error": "Customer not found"}, status=404)
+
 
         if wallet_tx.is_redeemed:
             return Response({
                 "message": f"Code {code} has already been redeemed at {wallet_tx.redeemed_at_shop.name}.",
                 "status": "redeemed"
             }, status=400)
+
 
         purchase_rule = PurchaseRule.objects.filter(
             shop=wallet_tx.wallet.shop,
@@ -739,8 +801,21 @@ class RedeemCodeView(APIView):
                 "redeemable_shops": [shop.name for shop in redeemable_shops]
             }, status=400)
 
-        with transaction.atomic(): 
-            customer = wallet_tx.wallet.customer
+
+        if wallet_tx.wallet.customer != customer:
+            return Response({"error": "This code does not belong to the provided customer"}, status=403)
+
+
+        discount_percentage = purchase_rule.discount_percentage
+        if discount_percentage is None: 
+            return Response({"error": "No discount percentage defined for this code"}, status=500)
+
+
+        discount_amount = (float(discount_percentage) / 100) * total_amount
+        new_amount = total_amount - discount_amount
+
+
+        with transaction.atomic():
             target_wallet, _ = Wallet.objects.get_or_create(
                 customer=customer,
                 shop=target_shop,
@@ -755,7 +830,10 @@ class RedeemCodeView(APIView):
 
             return Response({
                 "message": f"Code {code} successfully redeemed at {target_shop.name}. {wallet_tx.points} points added.",
-                "status": "redeemed"
+                "status": "redeemed",
+                "original_amount": total_amount,
+                "discount_amount": discount_amount,
+                "new_amount": new_amount
             }, status=200)
             
 class GetWalletView(APIView):
