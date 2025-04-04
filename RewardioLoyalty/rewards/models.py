@@ -17,17 +17,21 @@ class PurchaseRule(models.Model):
     redeemable = models.BooleanField(default=False)
     redeemable_shops = models.ManyToManyField(Shop, related_name='rules_redeemable_in', blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    expiration_days = models.IntegerField(null=True, blank=True, help_text="Days until points expire, null for no expiration")
+    discount_percentage = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, help_text="Percentage discount for redeemable codes (0-100)")
 
     def __str__(self):
         return f"{self.points} points for {self.min_purchase_amount}-{self.max_purchase_amount} in {self.shop}"
+    
+    
 class CurrencyConversion(models.Model):
     shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name='currency_conversions')
     currency = models.CharField(max_length=10)
-    points_per_currency = models.IntegerField()  # Points per unit of currency (like 1 INR = 10 points)
+    points_per_currency = models.IntegerField() 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-    def __str__(self):
+    def __str__(self):  
         return f"{self.currency}: {self.points_per_currency} points"
 
 class RewardType(models.Model):
@@ -38,9 +42,9 @@ class RewardType(models.Model):
         return self.reward_name
     
 class DirectReward(models.Model):
-    reward_type = models.ForeignKey(RewardType, on_delete=models.CASCADE, related_name='direct_rewards')  # Link to RewardType
-    shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name='direct_rewards')  # Link to Shop
-    points = models.IntegerField()  # Points assigned for this direct reward
+    reward_type = models.ForeignKey(RewardType, on_delete=models.CASCADE, related_name='direct_rewards') 
+    shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name='direct_rewards')
+    points = models.IntegerField()
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -48,6 +52,7 @@ class DirectReward(models.Model):
         return f"Direct Reward: {self.reward_type.reward_name} for {self.shop.shop_name} with {self.points} points"
 
 class Customer(models.Model):
+    shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name='customers')
     customer_id = models.CharField(max_length=100, unique=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -94,6 +99,7 @@ class WalletTransaction(models.Model):
     redeemed_at_shop = models.ForeignKey(Shop, on_delete=models.SET_NULL, null=True, blank=True, related_name='redeemed_transactions')
     description = models.CharField(max_length=255, default="Purchase processed via API")
     created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(null=True, blank=True) 
     
 
     def __str__(self):

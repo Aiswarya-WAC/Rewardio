@@ -13,7 +13,7 @@ class PurchaseRuleSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = PurchaseRule
-        fields = ['id', 'shop_id', 'min_purchase_amount', 'max_purchase_amount', 'points', 'redeemable', 'redeemable_shops']
+        fields = ['id', 'shop_id', 'min_purchase_amount', 'max_purchase_amount', 'points', 'redeemable', 'redeemable_shops', 'expiration_days', 'discount_percentage']
         
 
 class CurrencyConversionSerializer(serializers.ModelSerializer):
@@ -53,7 +53,7 @@ class WalletTransactionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = WalletTransaction
-        fields = ['id', 'amount', 'points', 'redeemable', 'code', 'is_redeemed', 'redeemed_at_shop_name', 'description', 'created_at']
+        fields = ['id', 'amount', 'points', 'redeemable', 'code', 'is_redeemed', 'redeemed_at_shop_name', 'description', 'created_at', 'expiration_days']
         
 
 class WalletSerializer(serializers.ModelSerializer):
