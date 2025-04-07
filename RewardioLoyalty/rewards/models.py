@@ -78,16 +78,15 @@ class DirectReward(models.Model):
 class Wallet(models.Model):
     customer = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name='wallets')
     shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name='wallets')
-    points = models.IntegerField(default=0)  
+    points = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        unique_together = ('customer', 'shop')  # Enforces 1 wallet per shop per customer
+        unique_together = ('customer', 'shop')  # One wallet per customer-shop pair
 
     def __str__(self):
-        return f"Wallet for {self.customer.customer_id} at {self.shop.shop_name}: {self.points} points"
-
+        return f"Wallet for {self.customer.customer_id} at {self.shop.name}: {self.points} points"
     
 class ShopRewardLimit(models.Model):
     shop = models.OneToOneField(Shop, on_delete=models.CASCADE)

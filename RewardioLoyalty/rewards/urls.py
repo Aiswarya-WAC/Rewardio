@@ -15,7 +15,7 @@ urlpatterns = [
     # Purchase Rules
     path('create-purchase-rule/', CreateAndUpdatePurchaseRuleView.as_view(), name='create-purchase-rule'),
     path('update-purchase-rule/<int:rule_id>/', CreateAndUpdatePurchaseRuleView.as_view(), name='update-purchase-rule'),
-  
+
 
     path("shop-reward-limit/", SetShopRewardLimitView.as_view(), name="shop-reward-limit"),
     # Currency Conversion
