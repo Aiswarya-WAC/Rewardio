@@ -81,7 +81,7 @@ class DirectRewardSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = DirectReward
-        fields = ['id', 'reward_type', 'shop', 'customer', 'points', 'created_at', 'updated_at']
+        fields = ['id', 'reward_type', 'shop', 'customer', 'points', 'created_at']
 
 
 # ___________________________________________________ rewards wallet section ________________________________________
