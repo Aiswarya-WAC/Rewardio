@@ -5,6 +5,11 @@ from rest_framework import status
 from rewards.models import Customer, Wallet, CurrencyConversion
 from authentication.models import Shop
 from django.shortcuts import get_object_or_404
+import math  # For rounding
+
+def process_external_payload(payload):
+    print(f"Processing external payload: {payload}")
+    return {"status": "Payload processed internally", "received_data": payload}
 
 class DeductPointsView(APIView):
     def post(self, request):
@@ -48,21 +53,28 @@ class DeductPointsView(APIView):
             # Get shop using api_key
             shop = get_object_or_404(Shop, api_key=shop_api_key)
 
-            # Get customer and verify they belong to this shop
-            customer = get_object_or_404(Customer, customer_id=customer_id, shop=shop)
-
-            # Get wallet
+            # Get customer by customer_id
+            customer = get_object_or_404(Customer, customer_id=customer_id)
+            
+            # Get wallet for this customer and shop
             wallet = get_object_or_404(Wallet, customer=customer, shop=shop)
 
-            # Get currency conversion for this specific shop
+            # Get currency conversion for this specific shop (moved up)
             currency_conversion = get_object_or_404(
                 CurrencyConversion,
                 shop=shop,
                 currency=currency_code
             )
 
+            # Condition 1: Check if wallet has at least 1 point
+            if wallet.points <= 1:
+                return Response(
+                    {"error": "Wallet must have more than 1 point to redeem"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
             # Check if enough points available
-            if wallet.purchase_points < points:  # Changed from wallet.points
+            if wallet.points < points:
                 return Response(
                     {"error": "Insufficient points"},
                     status=status.HTTP_400_BAD_REQUEST
@@ -71,6 +83,7 @@ class DeductPointsView(APIView):
             # Calculate amount equivalent to points being deducted
             points_per_currency = currency_conversion.points_per_currency
             deducted_amount = points / points_per_currency
+            deducted_amount = round(deducted_amount)  # Condition 2: Round to nearest integer
 
             # Check if deducted amount doesn't exceed cart amount
             if deducted_amount > cart_amount:
@@ -83,8 +96,18 @@ class DeductPointsView(APIView):
             deducted_cart_amount = cart_amount - deducted_amount
 
             # Deduct points
-            wallet.purchase_points -= points  # Changed from wallet.points
+            wallet.points -= points
             wallet.save()
+
+            # Prepare payload with hardcoded business_name and calculated values
+            payload = request.data.copy()
+            payload['business_name'] = "Nike"
+            payload['deducted_amount'] = deducted_amount
+            payload['deducted_cart_amount'] = deducted_cart_amount
+
+            # Process payload internally
+            external_result = process_external_payload(payload)
+            print(f"Internal processing result: {external_result}")
 
             return Response({
                 "message": "Points deducted successfully",
@@ -95,31 +118,16 @@ class DeductPointsView(APIView):
                 "points_deducted": points,
                 "deducted_amount": deducted_amount,
                 "deducted_cart_amount": deducted_cart_amount,
-                "remaining_points": wallet.purchase_points  # Changed from wallet.points
+                "remaining_points": wallet.points
             }, status=status.HTTP_200_OK)
 
         except Shop.DoesNotExist:
-            return Response(
-                {"error": "Invalid shop_api_key"},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            return Response({"error": "Invalid shop_api_key"}, status=status.HTTP_404_NOT_FOUND)
         except Customer.DoesNotExist:
-            return Response(
-                {"error": "Customer not found or doesn't belong to this shop"},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            return Response({"error": "Customer not found"}, status=status.HTTP_404_NOT_FOUND)
         except Wallet.DoesNotExist:
-            return Response(
-                {"error": "Wallet not found for this customer"},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            return Response({"error": "Wallet not found for this customer and shop"}, status=status.HTTP_404_NOT_FOUND)
         except CurrencyConversion.DoesNotExist:
-            return Response(
-                {"error": f"Currency conversion not found for {currency_code} in this shop"},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            return Response({"error": f"Currency conversion not found for {currency_code} in this shop"}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
-            return Response(
-                {"error": str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
