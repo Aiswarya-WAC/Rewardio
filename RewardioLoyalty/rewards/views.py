@@ -363,6 +363,7 @@ class DirectRewardView(APIView):
         except RewardType.DoesNotExist:
             return Response({"error": "Invalid reward UUID"}, status=status.HTTP_404_NOT_FOUND)
 
+
         customer, _ = Customer.objects.get_or_create(customer_id=customer_id, shop=shop)
         now = timezone.now()
 
@@ -590,15 +591,20 @@ class ProcessPurchaseWalletView(APIView):
         except Shop.DoesNotExist:
             return Response({"error": "Invalid API key"}, status=401)
 
-        from django.utils import timezone
-        from datetime import timedelta
-
         with transaction.atomic():
-            customer, _ = Customer.objects.get_or_create(customer_id=customer_id)
+            # Ensure customer has a shop
+            customer, created = Customer.objects.get_or_create(
+                customer_id=customer_id,
+                defaults={"shop": shop}
+            )
+            if not created and not customer.shop:  # Fix existing NULL shop
+                customer.shop = shop
+                customer.save()
+
             wallet, created = Wallet.objects.get_or_create(
                 customer=customer,
                 shop=shop,
-                defaults={"purchase_points": 0}
+                defaults={"points": 0}
             )
             purchase_rule = PurchaseRule.objects.filter(
                 shop=shop,
@@ -612,7 +618,7 @@ class ProcessPurchaseWalletView(APIView):
             expiration_days = purchase_rule.expiration_days if purchase_rule else None
             redeemable_shops = [shop.name for shop in purchase_rule.redeemable_shops.all()] if purchase_rule and redeemable else []
 
-            wallet.purchase_points += points
+            wallet.points += points
             wallet.save()
 
             expires_at = None
@@ -667,12 +673,12 @@ class ViewWalletDetailsView(APIView):
             expired_points = sum(
                 tx.points for tx in wallet.transactions.filter(expires_at__lt=timezone.now())
             )
-            available_points = max(wallet.purchase_points - expired_points, 0)
+            available_points = max(wallet.points - expired_points, 0)
             wallet_data.append({
                 "id": wallet.id,
                 "customer_id": wallet.customer.customer_id,
                 "shop_name": wallet.shop.name,
-                "purchase_points": available_points
+                "points": available_points
             })
             total_points += available_points
 
@@ -819,9 +825,9 @@ class RedeemCodeView(APIView):
             target_wallet, _ = Wallet.objects.get_or_create(
                 customer=customer,
                 shop=target_shop,
-                defaults={"purchase_points": 0}
+                defaults={"points": 0}
             )
-            target_wallet.purchase_points += wallet_tx.points
+            target_wallet.points += wallet_tx.points
             target_wallet.save()
 
             wallet_tx.is_redeemed = True
@@ -836,19 +842,109 @@ class RedeemCodeView(APIView):
                 "new_amount": new_amount
             }, status=200)
             
-class GetWalletView(APIView):
+# class GetWalletView(APIView):
+#     def get(self, request):
+#         customer_id = request.data.get("customer_id")
+#         api_key = request.data.get("api_key")  
+#         if not customer_id or not api_key:
+#             return Response({"error": "customer_id and api_key are required"}, status=400)
+
+#         try:
+#             shop = Shop.objects.get(api_key=api_key)
+#             wallet = Wallet.objects.get(customer__customer_id=customer_id, shop=shop)
+#             serializer = WalletSerializer(wallet)
+#             return Response(serializer.data, status=200)
+#         except Shop.DoesNotExist:
+#             return Response({"error": "Invalid API key"}, status=404)
+#         except Wallet.DoesNotExist:
+#             return Response({"error": "Wallet not found"}, status=404)
+
+
+class CentralizedWalletView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
     def get(self, request):
+        customer_id = request.query_params.get("customer_id")
+        if not customer_id:
+            return Response(
+                {"error": "customer_id is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        wallets = Wallet.objects.filter(customer__customer_id=customer_id)
+        if not wallets.exists():
+            return Response(
+                {"error": "No wallets found for this customer"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        total_points = 0
+        wallet_details = []
+        current_time = timezone.now()
+
+        for wallet in wallets:
+            expired_points = sum(
+                tx.points for tx in wallet.transactions.filter(
+                    expires_at__lt=current_time,
+                    is_redeemed=False  
+                )
+            )
+            available_points = max(wallet.points - expired_points, 0)
+            total_points += available_points
+
+        return Response({
+            "customer_id": customer_id,
+            "total_points": total_points,
+        }, status=status.HTTP_200_OK)
+        
+        
+class ShopBasedWalletView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
         customer_id = request.data.get("customer_id")
-        api_key = request.data.get("api_key")  
+        api_key = request.data.get("api_key")
+
         if not customer_id or not api_key:
-            return Response({"error": "customer_id and api_key are required"}, status=400)
+            return Response(
+                {"error": "customer_id and api_key are required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
 
         try:
             shop = Shop.objects.get(api_key=api_key)
-            wallet = Wallet.objects.get(customer__customer_id=customer_id, shop=shop)
-            serializer = WalletSerializer(wallet)
-            return Response(serializer.data, status=200)
         except Shop.DoesNotExist:
-            return Response({"error": "Invalid API key"}, status=404)
+            return Response(
+                {"error": "Invalid API key"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        try:
+            wallet = Wallet.objects.get(customer__customer_id=customer_id, shop=shop)
         except Wallet.DoesNotExist:
-            return Response({"error": "Wallet not found"}, status=404)
+            return Response(
+                {"error": "No wallet found for this customer and shop"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        current_time = timezone.now()
+        expired_points = sum(
+            tx.points for tx in wallet.transactions.filter(
+                expires_at__lt=current_time,
+                is_redeemed=False
+            )
+        )
+        available_points = max(wallet.points - expired_points, 0)
+
+        return Response({
+            "customer_id": customer_id,
+            "shop_id": shop.id,
+            "shop_name": shop.name,
+            "available_points": available_points
+        }, status=status.HTTP_200_OK)
+        
+    
+    
+# --------------------------------------------------vendor dashboard views----------------------------------------------------------------------------
+

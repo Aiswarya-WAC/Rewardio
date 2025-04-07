@@ -92,16 +92,17 @@ class WalletTransactionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = WalletTransaction
-        fields = ['id', 'amount', 'points', 'redeemable', 'code', 'is_redeemed', 'redeemed_at_shop_name', 'description', 'created_at', 'expiration_days']
+        fields = ['id', 'amount', 'points', 'redeemable', 'code', 'is_redeemed', 'redeemed_at_shop_name', 'description', 'created_at', 'expiration_days', 'customer_id']
         
 
 class WalletSerializer(serializers.ModelSerializer):
     customer_id = serializers.CharField(source='customer.customer_id')
     shop_name = serializers.CharField(source='shop.name')
 
+
     class Meta:
         model = Wallet
-        fields = ['id', 'customer_id', 'shop_name', 'purchase_points']
+        fields = ['id', 'customer_id','shop_name' ,'points']
         
         
 class WalletTransactionSerializer(serializers.ModelSerializer):

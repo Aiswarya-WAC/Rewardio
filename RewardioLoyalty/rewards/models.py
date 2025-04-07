@@ -1,12 +1,7 @@
-from django.db import models
-from django.db import models
 from django.contrib.auth.models import User
 from authentication.models import Shop
 import uuid
 from django.db import models
-from authentication.models import Shop
-from django.db import models
-from authentication.models import Shop
 
 
 class PurchaseRule(models.Model):
@@ -76,14 +71,17 @@ class DirectReward(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
 class Wallet(models.Model):
-    customer = models.OneToOneField(Customer, on_delete=models.CASCADE, related_name='wallet')
+    customer = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name='wallets')
     shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name='wallets')
-    points = models.IntegerField(default=0)  
+    points = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    class Meta:
+        unique_together = ('customer', 'shop')  # One wallet per customer-shop pair
+
     def __str__(self):
-        return f"Wallet for {self.customer.customer_id} at {self.shop.shop_name}: {self.points} points"
+        return f"Wallet for {self.customer.customer_id} at {self.shop.name}: {self.points} points"
     
 class ShopRewardLimit(models.Model):
     shop = models.OneToOneField(Shop, on_delete=models.CASCADE)
@@ -100,20 +98,6 @@ class ShopRewardLimit(models.Model):
 # ___________________________________________________ rewards wallet section ________________________________________
 
 
-
-
-class Wallet(models.Model):
-    customer = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name='wallets')
-    shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name='wallets')
-    purchase_points = models.IntegerField(default=0)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        unique_together = ('customer', 'shop')
-
-    def __str__(self):
-        return f"Wallet for {self.customer.customer_id} at {self.shop.name}"
 
 class WalletTransaction(models.Model):
     wallet = models.ForeignKey(Wallet, on_delete=models.CASCADE, related_name='transactions')

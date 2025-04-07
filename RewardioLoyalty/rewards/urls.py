@@ -1,6 +1,6 @@
 from django.urls import path
 from .views import (
-    CreateAndUpdatePurchaseRuleView, ShopPurchaseRulesView,
+    CreateAndUpdatePurchaseRuleView,
     CreateAndUpdateCurrencyConversionView, 
     RewardTypeView, 
     DirectRewardView, 
@@ -9,13 +9,12 @@ from .views import (
     RewardConditionView,
 )
 
-from .views import CreateAndUpdatePurchaseRuleView, CreateAndUpdateCurrencyConversionView, GetAllRulesView
+from .views import CreateAndUpdatePurchaseRuleView, CreateAndUpdateCurrencyConversionView, GetAllRulesView, CentralizedWalletView, ShopBasedWalletView
 from . import views 
 urlpatterns = [
     # Purchase Rules
     path('create-purchase-rule/', CreateAndUpdatePurchaseRuleView.as_view(), name='create-purchase-rule'),
     path('update-purchase-rule/<int:rule_id>/', CreateAndUpdatePurchaseRuleView.as_view(), name='update-purchase-rule'),
-    path('shop-purchase-rules/<int:shop_id>/', ShopPurchaseRulesView.as_view(), name='shop-purchase-rules'),
 
     path("shop-reward-limit/", SetShopRewardLimitView.as_view(), name="shop-reward-limit"),
     # Currency Conversion
@@ -41,4 +40,8 @@ urlpatterns = [
     path('view-tansaction-details/',views.ViewWalletTransactionsView.as_view(), name ='view-transaction-details'),
     path('generate-code/', views.GenerateCodeView.as_view(), name='generate_code'),
     path('redeem-code/', views.RedeemCodeView.as_view(), name='redeem_code'),
+    
+    path('rewards/centralized-wallet/', CentralizedWalletView.as_view()),
+    
+    path('rewards/shop-wallet/', ShopBasedWalletView.as_view()),
 ]
