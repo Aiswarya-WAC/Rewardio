@@ -22,5 +22,6 @@ urlpatterns = [
     path('',include('rewards.urls')),
     path('api/',include('authentication.urls')),
     path('',include('redeem.urls')),
-    path('',include('customer.urls'))
+    path('',include('customer.urls')),
+    path('',include('analytics.urls'))
 ]
