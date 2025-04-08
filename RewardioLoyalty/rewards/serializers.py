@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from .models import PurchaseRule, CurrencyConversion, RewardType, Shop
 from .models import Wallet, WalletTransaction
+from .models import Tier, CustomerTier
 from .models import DirectReward, RewardType, Shop
 from .models import RewardCondition
 
@@ -54,6 +55,10 @@ class RewardConditionSerializer(serializers.ModelSerializer):
         fields = ["id", "name", "max_usage_per_user", "duration_days", "recurring_type"]
 
 
+class RewardTypeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RewardType
+      
 
 class RewardTypeSerializer(serializers.ModelSerializer):
     reward_uuid = serializers.UUIDField(read_only=True)  # UUID is auto-generated
@@ -67,7 +72,7 @@ class RewardTypeSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = RewardType
-        fields = ["id", "reward_uuid", "reward_name", "description", "condition", "condition_id"]
+        fields = ["id", "reward_uuid", "reward_name", "description", "condition", "condition_id","has_expiring_points"]
 
 
 class DirectRewardSerializer(serializers.ModelSerializer):
@@ -77,7 +82,7 @@ class DirectRewardSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = DirectReward
-        fields = ['id', 'reward_type', 'shop', 'customer', 'points', 'created_at']
+        fields = ['id', 'reward_type', 'shop', 'customer', 'points', 'created_at', 'expiry_date']
 
 
 # ___________________________________________________ rewards wallet section ________________________________________
@@ -109,3 +114,22 @@ class WalletTransactionSerializer(serializers.ModelSerializer):
         fields = ['id', 'amount', 'points', 'redeemable', 'code', 'is_redeemed', 'redeemed_at_shop_name', 'description', 'created_at',]
         
         
+
+class TierSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Tier
+        fields = ['id', 'name', 'min_points', 'max_points', 'description', 'shop', 'created_at', 'updated_at']
+        read_only_fields = ['shop', 'created_at', 'updated_at']
+
+class CustomerTierSerializer(serializers.ModelSerializer):
+    tier = TierSerializer(read_only=True)
+    points = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CustomerTier
+        fields = ['id', 'customer', 'shop', 'tier', 'points', 'assigned_at', 'expires_at']
+        read_only_fields = ['assigned_at', 'expires_at', 'grace_period_expires_at', 'updated_at']
+
+    def get_points(self, obj):
+        wallet = Wallet.objects.filter(customer=obj.customer, shop=obj.shop).first()
+        return wallet.points if wallet else 0
