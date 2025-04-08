@@ -1,12 +1,7 @@
-from django.db import models
-from django.db import models
 from django.contrib.auth.models import User
 from authentication.models import Shop
 import uuid
 from django.db import models
-from authentication.models import Shop
-from django.db import models
-from authentication.models import Shop
 
 
 class PurchaseRule(models.Model):
@@ -36,8 +31,13 @@ class CurrencyConversion(models.Model):
 
 class Customer(models.Model):
     shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name='customers')
-    customer_id = models.CharField(max_length=100, unique=True)
+    customer_id = models.CharField(max_length=100)
     created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        unique_together = ('shop', 'customer_id')
+        
+
 
     def __str__(self):
         return self.customer_id
@@ -64,8 +64,7 @@ class RewardType(models.Model):
 
     def __str__(self):
         return self.reward_name
-    
-from django.utils.timezone import now
+
 
 class DirectReward(models.Model):
     shop = models.ForeignKey(Shop, on_delete=models.CASCADE)
