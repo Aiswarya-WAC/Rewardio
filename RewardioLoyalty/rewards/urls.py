@@ -15,6 +15,7 @@ urlpatterns = [
     # Purchase Rules
     path('create-purchase-rule/', CreateAndUpdatePurchaseRuleView.as_view(), name='create-purchase-rule'),
     path('update-purchase-rule/<int:rule_id>/', CreateAndUpdatePurchaseRuleView.as_view(), name='update-purchase-rule'),
+ 
 
     path("shop-reward-limit/", SetShopRewardLimitView.as_view(), name="shop-reward-limit"),
     # Currency Conversion
@@ -35,7 +36,7 @@ urlpatterns = [
     path('all-rules/', GetAllRulesView.as_view(), name='get-all-rules'),
     
     path('process-purchase-wallet/', views.ProcessPurchaseWalletView.as_view(), name='process_purchase_wallet'),
-    path('view-wallet-details/', views.ViewWalletDetailsView.as_view(), name='view_wallet_details'),
+    # path('view-wallet-details/', views.ViewWalletDetailsView.as_view(), name='view_wallet_details'),
     
     path('view-tansaction-details/',views.ViewWalletTransactionsView.as_view(), name ='view-transaction-details'),
     path('generate-code/', views.GenerateCodeView.as_view(), name='generate_code'),

@@ -8,12 +8,18 @@ from django.db import transaction
 from django.db.models import Count, Q
 from django.utils import timezone
 from django.utils.timezone import now
+from django.db.models.query import QuerySet  # Correct import for QuerySet
+from rest_framework import permissions, status
+from rest_framework.views import APIView
+from .models import Customer, Wallet, WalletTransaction, DirectReward
+from .serializers import WalletTransactionSerializer, DirectRewardSerializer  # Assuming serializers are in serializers.py
 
 from rest_framework import status, permissions
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-
+from . import models 
+from django.db.models.query import QuerySet
 from authentication.models import Shop
 from .models import (
     PurchaseRule, CurrencyConversion, RewardCondition, RewardType, 
@@ -24,9 +30,7 @@ from .serializers import (
     RewardConditionSerializer, RewardTypeSerializer, 
     DirectRewardSerializer, WalletTransactionSerializer, WalletSerializer
 )
-
-
-
+# --------------------------------------------------------------purchase rule section ---------------------------------------------------------------------------------
 
 class CreateAndUpdatePurchaseRuleView(APIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -39,9 +43,8 @@ class CreateAndUpdatePurchaseRuleView(APIView):
         redeemable = request.data.get("redeemable", False)
         redeemable_shops_ids = request.data.get("redeemable_shops", [])
         expiration_days = request.data.get("expiration_days")
-        discount_percentage = request.data.get("discount_percentage")  # New field
+        discount_percentage = request.data.get("discount_percentage")
 
-        # Step 1: Validate required fields
         required_fields = {
             "shop_id": shop_id,
             "min_purchase_amount": min_amount,
@@ -55,7 +58,6 @@ class CreateAndUpdatePurchaseRuleView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Step 2: Validate numeric fields
         try:
             shop_id = int(shop_id)
             min_amount = float(min_amount)
@@ -67,7 +69,6 @@ class CreateAndUpdatePurchaseRuleView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Validate ranges and non-negative values
         if min_amount < 0 or max_amount < 0 or points < 0:
             return Response(
                 {"error": "min_purchase_amount, max_purchase_amount, and points must be non-negative"},
@@ -79,7 +80,6 @@ class CreateAndUpdatePurchaseRuleView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Validate expiration_days if provided
         if expiration_days is not None:
             try:
                 expiration_days = int(expiration_days)
@@ -94,7 +94,6 @@ class CreateAndUpdatePurchaseRuleView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-        # Validate discount_percentage if redeemable
         if redeemable:
             if discount_percentage is None:
                 return Response(
@@ -205,6 +204,10 @@ class CreateAndUpdatePurchaseRuleView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
+# --------------------------------------------------------------purchase rule section end  ---------------------------------------------------------------------------------
+
+# --------------------------------------------------------------currency  section start  ---------------------------------------------------------------------------------
+
 class CreateAndUpdateCurrencyConversionView(APIView):
     """API endpoints for managing currency conversion rules for points calculation."""
     permission_classes = [permissions.IsAuthenticated]
@@ -233,6 +236,10 @@ class CreateAndUpdateCurrencyConversionView(APIView):
         currency_conversion.points_per_currency = request.data.get("points_per_currency", currency_conversion.points_per_currency)
         currency_conversion.save()
         return Response(CurrencyConversionSerializer(currency_conversion).data, status=status.HTTP_200_OK)
+
+# --------------------------------------------------------------currency section end ---------------------------------------------------------------------------------
+
+# --------------------------------------------------------------rewards section start  ---------------------------------------------------------------------------------
 
 
 class RewardConditionView(APIView):
@@ -471,6 +478,8 @@ class DirectRewardView(APIView):
         }, status=status.HTTP_201_CREATED)
 
 
+
+
 class SetShopRewardLimitView(APIView):
     """API for managing shop reward point limits."""
     permission_classes = [IsAuthenticated]
@@ -559,8 +568,10 @@ class GetAllRulesView(APIView):
         }
         return Response(response_data, status=status.HTTP_200_OK)
 
+# --------------------------------------------------------------rewards section end   ---------------------------------------------------------------------------------
 
-# ___________________________________________________ rewards wallet section ________________________________________
+# --------------------------------------------------------------redeem  section start  ---------------------------------------------------------------------------------
+
 
 class ProcessPurchaseWalletView(APIView):
     def generate_code(self, wallet_tx):
@@ -592,20 +603,21 @@ class ProcessPurchaseWalletView(APIView):
             return Response({"error": "Invalid API key"}, status=401)
 
         with transaction.atomic():
-            # Ensure customer has a shop
+            # Get or create a Customer instance specific to this shop-customer pair
             customer, created = Customer.objects.get_or_create(
                 customer_id=customer_id,
-                defaults={"shop": shop}
+                shop=shop,
+                defaults={"shop": shop}  # Redundant but ensures clarity
             )
-            if not created and not customer.shop:  # Fix existing NULL shop
-                customer.shop = shop
-                customer.save()
 
+            # Get or create a Wallet for this customer-shop pair
             wallet, created = Wallet.objects.get_or_create(
                 customer=customer,
                 shop=shop,
                 defaults={"points": 0}
             )
+
+            # Fetch applicable purchase rule
             purchase_rule = PurchaseRule.objects.filter(
                 shop=shop,
                 min_purchase_amount__lte=amount,
@@ -618,13 +630,16 @@ class ProcessPurchaseWalletView(APIView):
             expiration_days = purchase_rule.expiration_days if purchase_rule else None
             redeemable_shops = [shop.name for shop in purchase_rule.redeemable_shops.all()] if purchase_rule and redeemable else []
 
+            # Update wallet points
             wallet.points += points
             wallet.save()
 
+            # Set expiration date if applicable
             expires_at = None
             if expiration_days is not None:
                 expires_at = timezone.now() + timedelta(days=expiration_days)
 
+            # Create wallet transaction
             wallet_tx = WalletTransaction.objects.create(
                 wallet=wallet,
                 amount=amount,
@@ -634,6 +649,7 @@ class ProcessPurchaseWalletView(APIView):
                 expires_at=expires_at
             )
 
+            # Generate code if redeemable
             code = None
             if redeemable:
                 code = self.generate_code(wallet_tx)
@@ -642,76 +658,89 @@ class ProcessPurchaseWalletView(APIView):
 
             return Response({
                 "message": f"Purchase processed successfully for {shop.name}. {points} points allocated.",
+                "customer_id": customer_id,
+                "shop_id": shop.id,
                 "code": code,
                 "status": "not_redeemed" if code else None,
                 "redeemable_shops": redeemable_shops
             }, status=200)
             
-class ViewWalletDetailsView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+# class ViewWalletDetailsView(APIView):
+#     permission_classes = [permissions.IsAuthenticated]
 
-    def get(self, request):
-        customer_id = request.query_params.get("customer_id")
-        if not customer_id:
-            return Response(
-                {"error": "customer_id is required"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+#     def get(self, request):
+#         customer_id = request.query_params.get("customer_id")
+#         if not customer_id:
+#             return Response(
+#                 {"error": "customer_id is required"},
+#                 status=status.HTTP_400_BAD_REQUEST
+#             )
 
-        from django.utils import timezone
+#         from django.utils import timezone
 
-        wallets = Wallet.objects.filter(customer__customer_id=customer_id)
-        if not wallets.exists():
-            return Response(
-                {"error": "No wallets found for this customer"},
-                status=status.HTTP_404_NOT_FOUND
-            )
+#         wallets = Wallet.objects.filter(customer__customer_id=customer_id)
+#         if not wallets.exists():
+#             return Response(
+#                 {"error": "No wallets found for this customer"},
+#                 status=status.HTTP_404_NOT_FOUND
+#             )
 
-        wallet_data = []
-        total_points = 0
-        for wallet in wallets:
-            expired_points = sum(
-                tx.points for tx in wallet.transactions.filter(expires_at__lt=timezone.now())
-            )
-            available_points = max(wallet.points - expired_points, 0)
-            wallet_data.append({
-                "id": wallet.id,
-                "customer_id": wallet.customer.customer_id,
-                "shop_name": wallet.shop.name,
-                "points": available_points
-            })
-            total_points += available_points
+#         wallet_data = []
+#         total_points = 0
+#         for wallet in wallets:
+#             expired_points = sum(
+#                 tx.points for tx in wallet.transactions.filter(expires_at__lt=timezone.now())
+#             )
+#             available_points = max(wallet.points - expired_points, 0)
+#             wallet_data.append({
+#                 "id": wallet.id,
+#                 "customer_id": wallet.customer.customer_id,
+#                 "shop_name": wallet.shop.name,
+#                 "points": available_points
+#             })
+#             total_points += available_points
 
-        response_data = {
-            "wallets": wallet_data,
-            "total_points": total_points
-        }
-        return Response(response_data, status=status.HTTP_200_OK)
+#         response_data = {
+#             "wallets": wallet_data,
+#             "total_points": total_points
+#         }
+#         return Response(response_data, status=status.HTTP_200_OK)
             
+
 class ViewWalletTransactionsView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
         customer_id = request.query_params.get("customer_id")
         if not customer_id:
-            return Response(
-                {"error": "customer_id is required"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({"error": "customer_id is required"}, status=status.HTTP_400_BAD_REQUEST)
 
-        wallets = Wallet.objects.filter(customer__customer_id=customer_id)
-        if not wallets.exists():
-            return Response(
-                {"error": "No wallets found for this customer"},
-                status=status.HTTP_404_NOT_FOUND
-            )
+        # Ensure customers is a queryset
+        customers = Customer.objects.filter(customer_id=customer_id)
+        if not isinstance(customers, QuerySet):  # Corrected to use QuerySet from django.db.models.query
+            return Response({"error": "Internal error: customers is not a queryset"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-        transactions = WalletTransaction.objects.filter(wallet__in=wallets)
-        serializer = WalletTransactionSerializer(transactions, many=True)
+        if not customers.exists():
+            return Response({"error": "No customers found for this customer_id"}, status=status.HTTP_404_NOT_FOUND)
+
+        # Debug: Print the customers queryset
+        print(f"Customers: {list(customers)}")
+
+        wallets = Wallet.objects.filter(customer__in=customers)
+        direct_rewards = DirectReward.objects.filter(customer__in=customers)
+
+        if not wallets.exists() and not direct_rewards.exists():
+            return Response({"error": "No wallets or direct rewards found"}, status=status.HTTP_404_NOT_FOUND)
+
+        wallet_transactions = WalletTransaction.objects.filter(wallet__in=wallets)
+        wallet_serializer = WalletTransactionSerializer(wallet_transactions, many=True)
+
+        direct_serializer = DirectRewardSerializer(direct_rewards, many=True)
 
         return Response({
             "customer_id": customer_id,
-            "transactions": serializer.data
+            "wallet_transactions": wallet_serializer.data,
+            "direct_rewards": direct_serializer.data
         }, status=status.HTTP_200_OK)
             
             
@@ -772,25 +801,25 @@ class RedeemCodeView(APIView):
         except (ValueError, TypeError):
             return Response({"error": "total_amount must be a number"}, status=400)
 
-
         try:
             wallet_tx = WalletTransaction.objects.get(code=code)
-            target_shop = Shop.objects.get(api_key=target_api_key)
-            customer = Customer.objects.get(customer_id=customer_id)
         except WalletTransaction.DoesNotExist:
             return Response({"error": "Invalid code"}, status=404)
+
+        try:
+            target_shop = Shop.objects.get(api_key=target_api_key)
         except Shop.DoesNotExist:
             return Response({"error": "Invalid target API key"}, status=401)
-        except Customer.DoesNotExist:
-            return Response({"error": "Customer not found"}, status=404)
 
+        customer = wallet_tx.wallet.customer
+        if customer.customer_id != customer_id:
+            return Response({"error": "This code does not belong to the provided customer"}, status=403)
 
         if wallet_tx.is_redeemed:
             return Response({
                 "message": f"Code {code} has already been redeemed at {wallet_tx.redeemed_at_shop.name}.",
                 "status": "redeemed"
             }, status=400)
-
 
         purchase_rule = PurchaseRule.objects.filter(
             shop=wallet_tx.wallet.shop,
@@ -807,19 +836,12 @@ class RedeemCodeView(APIView):
                 "redeemable_shops": [shop.name for shop in redeemable_shops]
             }, status=400)
 
-
-        if wallet_tx.wallet.customer != customer:
-            return Response({"error": "This code does not belong to the provided customer"}, status=403)
-
-
         discount_percentage = purchase_rule.discount_percentage
-        if discount_percentage is None: 
+        if discount_percentage is None:
             return Response({"error": "No discount percentage defined for this code"}, status=500)
-
 
         discount_amount = (float(discount_percentage) / 100) * total_amount
         new_amount = total_amount - discount_amount
-
 
         with transaction.atomic():
             target_wallet, _ = Wallet.objects.get_or_create(
@@ -842,22 +864,10 @@ class RedeemCodeView(APIView):
                 "new_amount": new_amount
             }, status=200)
             
-# class GetWalletView(APIView):
-#     def get(self, request):
-#         customer_id = request.data.get("customer_id")
-#         api_key = request.data.get("api_key")  
-#         if not customer_id or not api_key:
-#             return Response({"error": "customer_id and api_key are required"}, status=400)
+# --------------------------------------------------------------redeem  section end   ---------------------------------------------------------------------------------
 
-#         try:
-#             shop = Shop.objects.get(api_key=api_key)
-#             wallet = Wallet.objects.get(customer__customer_id=customer_id, shop=shop)
-#             serializer = WalletSerializer(wallet)
-#             return Response(serializer.data, status=200)
-#         except Shop.DoesNotExist:
-#             return Response({"error": "Invalid API key"}, status=404)
-#         except Wallet.DoesNotExist:
-#             return Response({"error": "Wallet not found"}, status=404)
+            
+# -------------------------------------------------------------wallet section start----------------------------------------------------------------------------------
 
 
 class CentralizedWalletView(APIView):
@@ -866,36 +876,63 @@ class CentralizedWalletView(APIView):
     def get(self, request):
         customer_id = request.query_params.get("customer_id")
         if not customer_id:
-            return Response(
-                {"error": "customer_id is required"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({"error": "customer_id is required"}, status=400)
 
-        wallets = Wallet.objects.filter(customer__customer_id=customer_id)
-        if not wallets.exists():
-            return Response(
-                {"error": "No wallets found for this customer"},
-                status=status.HTTP_404_NOT_FOUND
-            )
+        customers = Customer.objects.filter(customer_id=customer_id)
+        if not customers.exists():
+            return Response({"error": "Customer not found"}, status=404)
 
-        total_points = 0
+        total_transaction_points = 0
+        total_direct_reward_points = 0
         wallet_details = []
         current_time = timezone.now()
 
-        for wallet in wallets:
-            expired_points = sum(
-                tx.points for tx in wallet.transactions.filter(
-                    expires_at__lt=current_time,
-                    is_redeemed=False  
+        for customer in customers:
+            wallets = Wallet.objects.filter(customer=customer)
+            direct_rewards = DirectReward.objects.filter(customer=customer)
+
+            for wallet in wallets:
+                active_transactions = wallet.transactions.filter(
+                    Q(expires_at__gt=current_time) | Q(expires_at__isnull=True),
+                    is_redeemed=False
                 )
-            )
-            available_points = max(wallet.points - expired_points, 0)
-            total_points += available_points
+                transaction_points = sum(tx.points for tx in active_transactions)
+                direct_reward_points = sum(
+                    dr.points for dr in direct_rewards.filter(shop=wallet.shop)
+                )
+
+                total_transaction_points += transaction_points
+                total_direct_reward_points += direct_reward_points
+
+                wallet_details.append({
+                    "shop_id": wallet.shop.id,
+                    "shop_name": wallet.shop.name,
+                    "transaction_points": transaction_points,
+                    "direct_reward_points": direct_reward_points,
+                    "total_combined_points": transaction_points + direct_reward_points
+                })
+
+            wallet_shops = set(wallet.shop for wallet in wallets)
+            direct_rewards_no_wallet = direct_rewards.exclude(shop__in=wallet_shops)
+            for dr in direct_rewards_no_wallet:
+                total_direct_reward_points += dr.points
+                wallet_details.append({
+                    "shop_id": dr.shop.id,
+                    "shop_name": dr.shop.name,
+                    "transaction_points": 0,
+                    "direct_reward_points": dr.points,
+                    "total_combined_points": dr.points
+                })
+
+        total_combined_points = total_transaction_points + total_direct_reward_points
 
         return Response({
             "customer_id": customer_id,
-            "total_points": total_points,
-        }, status=status.HTTP_200_OK)
+            "total_transaction_points": total_transaction_points,
+            "total_direct_reward_points": total_direct_reward_points,
+            "total_combined_points": total_combined_points,
+            "wallet_breakdown": wallet_details
+        }, status=200)
         
         
 class ShopBasedWalletView(APIView):
@@ -906,45 +943,43 @@ class ShopBasedWalletView(APIView):
         api_key = request.data.get("api_key")
 
         if not customer_id or not api_key:
-            return Response(
-                {"error": "customer_id and api_key are required"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
+            return Response({"error": "customer_id and api_key are required"}, status=400)
 
         try:
             shop = Shop.objects.get(api_key=api_key)
         except Shop.DoesNotExist:
-            return Response(
-                {"error": "Invalid API key"},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            return Response({"error": "Invalid API key"}, status=404)
 
         try:
-            wallet = Wallet.objects.get(customer__customer_id=customer_id, shop=shop)
-        except Wallet.DoesNotExist:
-            return Response(
-                {"error": "No wallet found for this customer and shop"},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            customer = Customer.objects.get(customer_id=customer_id, shop=shop)
+        except Customer.DoesNotExist:
+            return Response({"error": "Customer not found for this shop"}, status=404)
 
-        current_time = timezone.now()
-        expired_points = sum(
-            tx.points for tx in wallet.transactions.filter(
-                expires_at__lt=current_time,
+        try:
+            wallet = Wallet.objects.get(customer=customer, shop=shop)
+            current_time = timezone.now()
+            active_transactions = wallet.transactions.filter(
+                Q(expires_at__gt=current_time) | Q(expires_at__isnull=True),
                 is_redeemed=False
             )
+            transaction_points = sum(tx.points for tx in active_transactions)
+        except Wallet.DoesNotExist:
+            transaction_points = 0
+
+        direct_reward_points = sum(
+            dr.points for dr in DirectReward.objects.filter(customer=customer, shop=shop)
         )
-        available_points = max(wallet.points - expired_points, 0)
+
+        total_combined_points = transaction_points + direct_reward_points
 
         return Response({
             "customer_id": customer_id,
             "shop_id": shop.id,
             "shop_name": shop.name,
-            "available_points": available_points
-        }, status=status.HTTP_200_OK)
+            "transaction_points": transaction_points,
+            "direct_reward_points": direct_reward_points,
+            "total_combined_points": total_combined_points
+        }, status=200)
         
-    
-    
-# --------------------------------------------------vendor dashboard views----------------------------------------------------------------------------
 
+# -------------------------------------------------------------wallet section end ----------------------------------------------------------------------------------
