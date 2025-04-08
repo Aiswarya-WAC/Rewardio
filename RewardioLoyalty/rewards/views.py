@@ -736,16 +736,22 @@ class ProcessPurchaseWalletView(APIView):
         except Shop.DoesNotExist:
             return Response({"error": "Invalid API key"}, status=401)
 
-        from django.utils import timezone
-        from datetime import timedelta
-
         with transaction.atomic():
-            customer, _ = Customer.objects.get_or_create(customer_id=customer_id)
+            # Get or create a Customer instance specific to this shop-customer pair
+            customer, created = Customer.objects.get_or_create(
+                customer_id=customer_id,
+                shop=shop,
+                defaults={"shop": shop}  # Redundant but ensures clarity
+            )
+
+            # Get or create a Wallet for this customer-shop pair
             wallet, created = Wallet.objects.get_or_create(
                 customer=customer,
                 shop=shop,
-                defaults={"purchase_points": 0}
+                defaults={"points": 0}
             )
+
+            # Fetch applicable purchase rule
             purchase_rule = PurchaseRule.objects.filter(
                 shop=shop,
                 min_purchase_amount__lte=amount,
@@ -758,13 +764,16 @@ class ProcessPurchaseWalletView(APIView):
             expiration_days = purchase_rule.expiration_days if purchase_rule else None
             redeemable_shops = [shop.name for shop in purchase_rule.redeemable_shops.all()] if purchase_rule and redeemable else []
 
-            wallet.purchase_points += points
+            # Update wallet points
+            wallet.points += points
             wallet.save()
 
+            # Set expiration date if applicable
             expires_at = None
             if expiration_days is not None:
                 expires_at = timezone.now() + timedelta(days=expiration_days)
 
+            # Create wallet transaction
             wallet_tx = WalletTransaction.objects.create(
                 wallet=wallet,
                 amount=amount,
@@ -774,6 +783,7 @@ class ProcessPurchaseWalletView(APIView):
                 expires_at=expires_at
             )
 
+            # Generate code if redeemable
             code = None
             if redeemable:
                 code = self.generate_code(wallet_tx)
@@ -782,11 +792,14 @@ class ProcessPurchaseWalletView(APIView):
 
             return Response({
                 "message": f"Purchase processed successfully for {shop.name}. {points} points allocated.",
+                "customer_id": customer_id,
+                "shop_id": shop.id,
                 "code": code,
                 "status": "not_redeemed" if code else None,
                 "redeemable_shops": redeemable_shops
             }, status=200)
-            
+
+
 class ViewWalletDetailsView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
