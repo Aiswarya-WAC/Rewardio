@@ -1,0 +1,77 @@
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# Common editor files
+*.log
+*.tmp
+.vscode/
+.idea/
+*.sublime-workspace
+
+# Node.js
+node_modules/
+npm-debug.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+env/
+
+# Build outputs
+dist/
+build/
+*.o
+*.exe
+
+# Environment variables
+.env
+*.pem
+*.key
+credentials.json
+
+# Logs
+logs/
+*.log
+
+# Temporary files
+*.bak
+*.swp
+
+# Ignore all .txt files
+*.txt
+
+# Ignore everything in a folder
+temp/
+
+# Ignore everything except specific files
+/*
+!.gitignore
+!README.md
+
+# Dependencies
+node_modules/
+
+# Logs
+*.log
+npm-debug.log
+
+# Build output
+dist/
+build/
+
+# Environment variables
+.env
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
