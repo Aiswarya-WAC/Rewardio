@@ -1,16 +1,14 @@
 from rest_framework import serializers
 from .models import PurchaseRule, CurrencyConversion, RewardType, Shop
-from .models import DirectReward, RewardType, Shop
-from rest_framework import serializers
-from .models import DirectReward, RewardType, Shop, Customer
-from rest_framework import serializers
 from .models import Wallet, WalletTransaction
 from .models import Tier, CustomerTier
-
+from .models import DirectReward, RewardType, Shop
+from .models import RewardCondition
 
 class PurchaseRuleSerializer(serializers.ModelSerializer):
     shop_id = serializers.PrimaryKeyRelatedField(source='shop', queryset=Shop.objects.all())
     redeemable_shops = serializers.PrimaryKeyRelatedField(many=True, queryset=Shop.objects.all(), required=False)
+    
 
     class Meta:
         model = PurchaseRule
@@ -34,8 +32,7 @@ class ShopSerializer(serializers.ModelSerializer):
         model = Shop
         fields = ['id', 'vendor', 'shop_name', 'api_key', 'created_at']
 
-from .models import DirectReward, RewardType, Shop
-from .models import DirectReward
+
 
 class DirectRewardSerializer(serializers.ModelSerializer):
     reward_type = RewardTypeSerializer(read_only=True)
@@ -50,8 +47,7 @@ class DirectRewardSerializer(serializers.ModelSerializer):
         fields = ["id", "shop_id", "reward_type", "reward_type_id", "customer_id", "points"]
 
 
-from rest_framework import serializers
-from .models import RewardCondition
+
 
 class RewardConditionSerializer(serializers.ModelSerializer):
     class Meta:
@@ -97,16 +93,17 @@ class WalletTransactionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = WalletTransaction
-        fields = ['id', 'amount', 'points', 'redeemable', 'code', 'is_redeemed', 'redeemed_at_shop_name', 'description', 'created_at', 'expiration_days']
+        fields = ['id', 'amount', 'points', 'redeemable', 'code', 'is_redeemed', 'redeemed_at_shop_name', 'description', 'created_at', 'expiration_days', 'customer_id','points  ']
         
 
 class WalletSerializer(serializers.ModelSerializer):
     customer_id = serializers.CharField(source='customer.customer_id')
     shop_name = serializers.CharField(source='shop.name')
 
+
     class Meta:
         model = Wallet
-        fields = ['id', 'customer_id', 'shop_name', 'purchase_points']
+        fields = ['id', 'customer_id','shop_name' ,'points']
         
         
 class WalletTransactionSerializer(serializers.ModelSerializer):
@@ -114,7 +111,7 @@ class WalletTransactionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = WalletTransaction
-        fields = ['id', 'amount', 'points', 'redeemable', 'code', 'is_redeemed', 'redeemed_at_shop_name', 'description', 'created_at']
+        fields = ['id', 'amount', 'points', 'redeemable', 'code', 'is_redeemed', 'redeemed_at_shop_name', 'description', 'created_at',]
         
         
 

@@ -21,4 +21,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('',include('rewards.urls')),
     path('api/',include('authentication.urls')),
+    path('',include('redeem.urls')),
+    path('',include('customer.urls')),
+    path('',include('voucher.urls')),
 ]

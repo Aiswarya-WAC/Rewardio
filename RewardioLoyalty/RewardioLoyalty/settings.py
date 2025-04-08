@@ -41,6 +41,8 @@ INSTALLED_APPS = [
     'authentication',
     'rewards',
     'rest_framework', 
+    'redeem',
+    'voucher',
 ]
 
 REST_FRAMEWORK = {

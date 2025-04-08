@@ -1,5 +1,3 @@
-from django.db import models
-from django.db import models
 from django.contrib.auth.models import User
 from authentication.models import Shop
 import uuid
@@ -41,7 +39,6 @@ class Customer(models.Model):
     
     class Meta:
         unique_together = ('shop', 'customer_id')
-          
     def __str__(self):
         return self.customer_id
    
@@ -69,7 +66,7 @@ class RewardType(models.Model):
 
     def __str__(self):
         return self.reward_name
-    
+
 
 class DirectReward(models.Model):
     shop = models.ForeignKey(Shop, on_delete=models.CASCADE)
@@ -110,8 +107,6 @@ class ShopRewardLimit(models.Model):
 
 
 # ___________________________________________________ rewards wallet section ________________________________________
-
-
 
 
 class WalletTransaction(models.Model):
