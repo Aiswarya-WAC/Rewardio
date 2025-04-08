@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 import random
 import string
 from django.db import transaction
@@ -17,15 +17,14 @@ from rest_framework.views import APIView
 from authentication.models import Shop
 from .models import (
     PurchaseRule, CurrencyConversion, RewardCondition, RewardType, 
-    DirectReward, Customer, Wallet, WalletTransaction, ShopRewardLimit
+    DirectReward, Customer, Wallet, WalletTransaction, ShopRewardLimit,Tier, CustomerTier
 )
 from .serializers import (
     PurchaseRuleSerializer, CurrencyConversionSerializer, 
     RewardConditionSerializer, RewardTypeSerializer, 
-    DirectRewardSerializer, WalletTransactionSerializer, WalletSerializer
+    DirectRewardSerializer, WalletTransactionSerializer, WalletSerializer ,TierSerializer, CustomerTierSerializer
+
 )
-
-
 
 
 class CreateAndUpdatePurchaseRuleView(APIView):
@@ -334,15 +333,14 @@ class RewardTypeView(APIView):
 
 
 class DirectRewardView(APIView):
-    """API for assigning direct rewards to customers with various constraints."""
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        """Assign a direct reward and update wallet points with constraints."""
         shop_api_key = request.data.get("shop_api_key")
         reward_uuid = request.data.get("reward_uuid")
         customer_id = request.data.get("customer_id")
         points = int(request.data.get("points", 0))
+        expiry_date_str = request.data.get("expiry_date")  # Expecting 'YYYY-MM-DD'
 
         if not (shop_api_key and reward_uuid and customer_id and points > 0):
             return Response({"error": "Missing or invalid required fields"}, status=status.HTTP_400_BAD_REQUEST)
@@ -373,7 +371,6 @@ class DirectRewardView(APIView):
         )
 
         def get_recurring_filter(recurring_type):
-            """Generate filter for recurring reward conditions based on time period."""
             if recurring_type == "daily":
                 return Q(created_at__date=now.date())
             elif recurring_type == "weekly":
@@ -397,7 +394,6 @@ class DirectRewardView(APIView):
             return Q()
 
         def get_next_recurring_eligible_date(recurring_type):
-            """Calculate next eligible date for recurring rewards."""
             if recurring_type == "daily":
                 return (now + timedelta(days=1)).date()
             elif recurring_type == "weekly":
@@ -413,14 +409,12 @@ class DirectRewardView(APIView):
                 month = next_quarter_start_month if next_quarter_start_month <= 12 else next_quarter_start_month - 12
                 return timezone.datetime(year, month, 1).date()
             elif recurring_type == "bi_annual":
-                if now.month <= 6:
-                    return timezone.datetime(now.year, 7, 1).date()
-                else:
-                    return timezone.datetime(now.year + 1, 1, 1).date()
+                return timezone.datetime(now.year, 7, 1).date() if now.month <= 6 else timezone.datetime(now.year + 1, 1, 1).date()
             elif recurring_type == "yearly":
                 return timezone.datetime(now.year + 1, 1, 1).date()
             return None
 
+        # Recurring reward restriction
         recurring_filter = get_recurring_filter(reward_condition.recurring_type)
         recurring_count = previous_rewards.filter(recurring_filter).count()
 
@@ -431,11 +425,12 @@ class DirectRewardView(APIView):
                 "next_eligible_date": str(next_eligible) if next_eligible else None
             }, status=status.HTTP_400_BAD_REQUEST)
 
+        # Max usage restriction
         if reward_condition.max_usage_per_user:
-            total_given = previous_rewards.count()
-            if total_given >= reward_condition.max_usage_per_user:
+            if previous_rewards.count() >= reward_condition.max_usage_per_user:
                 return Response({"error": "Reward usage limit reached for this user."}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Duration restriction
         if reward_condition.duration_days:
             recent = previous_rewards.order_by("-created_at").first()
             if recent and (now - recent.created_at).days < reward_condition.duration_days:
@@ -444,6 +439,18 @@ class DirectRewardView(APIView):
                     "error": f"Reward can be used only once in {reward_condition.duration_days} days.",
                     "next_eligible_date": str(next_eligible)
                 }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Handle expiry date (if required)
+        expiry_date = None
+        if reward_type.has_expiring_points:
+            if not expiry_date_str:
+                return Response({"error": "This reward requires an expiry date."}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                expiry_date = datetime.strptime(expiry_date_str, "%Y-%m-%d").date()
+                if expiry_date <= now.date():
+                    return Response({"error": "Expiry date must be in the future."}, status=status.HTTP_400_BAD_REQUEST)
+            except ValueError:
+                return Response({"error": "Invalid expiry_date format. Use YYYY-MM-DD."}, status=status.HTTP_400_BAD_REQUEST)
 
         with transaction.atomic():
             wallet, _ = Wallet.objects.get_or_create(customer=customer, shop=shop)
@@ -458,18 +465,27 @@ class DirectRewardView(APIView):
                 shop=shop,
                 reward_type=reward_type,
                 customer=customer,
-                points=points
+                points=points,
+                expiry_date=expiry_date
             )
+
+            # Update customer tier
+            update_tier_data = {"customer_id": customer_id, "shop_id": shop.id}
+            update_tier_view = UpdateCustomerTierView()
+            update_response = update_tier_view.post(
+                request=type('Request', (), {'data': update_tier_data, 'user': request.user})()
+            )
+            tier_data = update_response.data if update_response.status_code == 200 else {"error": "Tier update failed"}
 
         serializer = DirectRewardSerializer(direct_reward)
         return Response({
             "reward": serializer.data,
             "wallet_balance": wallet.points,
             "shop_used_points": shop_limit.used_points,
-            "total_points_used": shop_limit.total_points_used
+            "total_points_used": shop_limit.total_points_used,
+            "tier_info": tier_data
         }, status=status.HTTP_201_CREATED)
-
-
+    
 class SetShopRewardLimitView(APIView):
     """API for managing shop reward point limits."""
     permission_classes = [IsAuthenticated]
@@ -590,16 +606,22 @@ class ProcessPurchaseWalletView(APIView):
         except Shop.DoesNotExist:
             return Response({"error": "Invalid API key"}, status=401)
 
-        from django.utils import timezone
-        from datetime import timedelta
-
         with transaction.atomic():
-            customer, _ = Customer.objects.get_or_create(customer_id=customer_id)
+            # Get or create a Customer instance specific to this shop-customer pair
+            customer, created = Customer.objects.get_or_create(
+                customer_id=customer_id,
+                shop=shop,
+                defaults={"shop": shop}  # Redundant but ensures clarity
+            )
+
+            # Get or create a Wallet for this customer-shop pair
             wallet, created = Wallet.objects.get_or_create(
                 customer=customer,
                 shop=shop,
-                defaults={"purchase_points": 0}
+                defaults={"points": 0}
             )
+
+            # Fetch applicable purchase rule
             purchase_rule = PurchaseRule.objects.filter(
                 shop=shop,
                 min_purchase_amount__lte=amount,
@@ -612,13 +634,16 @@ class ProcessPurchaseWalletView(APIView):
             expiration_days = purchase_rule.expiration_days if purchase_rule else None
             redeemable_shops = [shop.name for shop in purchase_rule.redeemable_shops.all()] if purchase_rule and redeemable else []
 
-            wallet.purchase_points += points
+            # Update wallet points
+            wallet.points += points
             wallet.save()
 
+            # Set expiration date if applicable
             expires_at = None
             if expiration_days is not None:
                 expires_at = timezone.now() + timedelta(days=expiration_days)
 
+            # Create wallet transaction
             wallet_tx = WalletTransaction.objects.create(
                 wallet=wallet,
                 amount=amount,
@@ -628,17 +653,27 @@ class ProcessPurchaseWalletView(APIView):
                 expires_at=expires_at
             )
 
+            # Generate code if redeemable
             code = None
             if redeemable:
                 code = self.generate_code(wallet_tx)
                 if not code:
                     return Response({"error": "Failed to generate code"}, status=500)
 
+    # Update customer tier
+            update_tier_data = {"customer_id": customer_id, "shop_id": shop.id}
+            update_tier_view = UpdateCustomerTierView()
+            update_response = update_tier_view.post(
+                request=type('Request', (), {'data': update_tier_data, 'user': request.user})()
+            )
+            tier_data = update_response.data if update_response.status_code == 200 else {"error": "Tier update failed"}
+
             return Response({
                 "message": f"Purchase processed successfully for {shop.name}. {points} points allocated.",
                 "code": code,
                 "status": "not_redeemed" if code else None,
-                "redeemable_shops": redeemable_shops
+                "redeemable_shops": redeemable_shops,  
+                "tier_info": tier_data
             }, status=200)
             
 class ViewWalletDetailsView(APIView):
@@ -667,12 +702,12 @@ class ViewWalletDetailsView(APIView):
             expired_points = sum(
                 tx.points for tx in wallet.transactions.filter(expires_at__lt=timezone.now())
             )
-            available_points = max(wallet.purchase_points - expired_points, 0)
+            available_points = max(wallet.points - expired_points, 0)
             wallet_data.append({
                 "id": wallet.id,
                 "customer_id": wallet.customer.customer_id,
                 "shop_name": wallet.shop.name,
-                "purchase_points": available_points
+                "points": available_points
             })
             total_points += available_points
 
@@ -819,9 +854,9 @@ class RedeemCodeView(APIView):
             target_wallet, _ = Wallet.objects.get_or_create(
                 customer=customer,
                 shop=target_shop,
-                defaults={"purchase_points": 0}
+                defaults={"points": 0}
             )
-            target_wallet.purchase_points += wallet_tx.points
+            target_wallet.points += wallet_tx.points
             target_wallet.save()
 
             wallet_tx.is_redeemed = True
@@ -852,3 +887,208 @@ class GetWalletView(APIView):
             return Response({"error": "Invalid API key"}, status=404)
         except Wallet.DoesNotExist:
             return Response({"error": "Wallet not found"}, status=404)
+
+
+class SetTierView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        shop_id = request.data.get("shop_id")
+        tiers = request.data.get("tiers")
+
+        if not shop_id:
+            return Response({"error": "shop_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+        if not tiers:
+            return Response({"error": "tiers is required in the request body"}, status=status.HTTP_400_BAD_REQUEST)
+        if not isinstance(tiers, list) or not tiers:
+            return Response({"error": "tiers must be a non-empty list"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            shop = Shop.objects.get(id=shop_id)
+            if shop.owner != request.user:
+                return Response({"error": "You do not own this shop"}, status=status.HTTP_403_FORBIDDEN)
+        except Shop.DoesNotExist:
+            return Response({"error": "Shop not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        with transaction.atomic():
+            Tier.objects.filter(shop=shop).delete()
+
+            for tier_data in tiers:
+                name = tier_data.get("name")
+                min_points = tier_data.get("min_points")
+                max_points = tier_data.get("max_points")
+                description = tier_data.get("description", "")
+
+                if not all([name, min_points is not None, max_points is not None]):
+                    return Response(
+                        {"error": "name, min_points, and max_points are required for each tier"},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+                try:
+                    min_points = int(min_points)
+                    max_points = int(max_points)
+                    if min_points < 0 or max_points < 0 or min_points >= max_points:
+                        return Response({"error": "Invalid point range"}, status=status.HTTP_400_BAD_REQUEST)
+                except (ValueError, TypeError):
+                    return Response(
+                        {"error": "min_points and max_points must be integers"},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+                overlapping = Tier.objects.filter(
+                    shop=shop,
+                    min_points__lt=max_points,
+                    max_points__gt=min_points
+                )
+                if overlapping.exists():
+                    return Response(
+                        {"error": f"Tier {name} overlaps with existing tiers"},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+                Tier.objects.create(
+                    shop=shop,
+                    name=name,
+                    min_points=min_points,
+                    max_points=max_points,
+                    description=description
+                )
+
+            serializer = TierSerializer(Tier.objects.filter(shop=shop), many=True)
+            return Response({"tiers": serializer.data}, status=status.HTTP_201_CREATED)
+
+
+class UpdateCustomerTierView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        customer_id = request.data.get("customer_id")
+        shop_id = request.data.get("shop_id")
+
+        if not all([customer_id, shop_id]):
+            return Response({"error": "customer_id and shop_id are required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            shop = Shop.objects.get(id=shop_id)
+            customer, _ = Customer.objects.get_or_create(customer_id=customer_id, shop=shop)  # Ensure customer exists
+        except Shop.DoesNotExist:
+            return Response({"error": "Shop not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        # Get or create customer's wallet
+        wallet, _ = Wallet.objects.get_or_create(
+            customer=customer,
+            shop=shop,
+            defaults={"points": 0}
+        )
+        
+        points = wallet.points
+
+        # Find the appropriate tier
+        tier = Tier.objects.filter(
+            shop=shop,
+            min_points__lte=points,
+            max_points__gte=points
+        ).first()
+
+        if not tier:
+            return Response({"error": "No matching tier found for customer's points"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Update or create customer tier
+        with transaction.atomic():
+            customer_tier, created = CustomerTier.objects.get_or_create(
+                customer=customer,
+                shop=shop,
+                defaults={"tier": tier}
+            )
+       
+            now = timezone.now()
+            tier_duration = timedelta(days=30)
+            grace_period = timedelta(days=10)
+
+            if created or customer_tier.tier != tier:
+                old_tier = customer_tier.tier
+                customer_tier.tier = tier
+                customer_tier.assigned_at = now
+                customer_tier.expires_at = now + tier_duration
+                customer_tier.grace_period_expires_at = None
+                customer_tier.save()
+
+                status_message = "Tier assigned" if created else "No change"
+                if old_tier and old_tier != tier:
+                    status_message = "Tier upgraded" if old_tier.min_points < tier.min_points else "Tier downgraded"
+            else:
+                status_message = "No change"
+
+            serializer = CustomerTierSerializer(customer_tier)
+            return Response({
+                "customer_tier": serializer.data,
+                "status": status_message
+            }, status=status.HTTP_200_OK)
+
+
+class GetCustomerTierView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        customer_id = request.query_params.get("customer_id")
+        shop_id = request.query_params.get("shop_id")
+
+        if not all([customer_id, shop_id]):
+            return Response({"error": "customer_id and shop_id are required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            shop = Shop.objects.get(id=shop_id)
+            customer = Customer.objects.get(customer_id=customer_id, shop=shop)
+            customer_tier = CustomerTier.objects.get(customer=customer, shop=shop)
+        except Shop.DoesNotExist:
+            return Response({"error": "Shop not found"}, status=status.HTTP_404_NOT_FOUND)
+        except Customer.DoesNotExist:
+            return Response({"error": "Customer not found for this shop"}, status=status.HTTP_404_NOT_FOUND)
+        except CustomerTier.DoesNotExist:
+            return Response({"error": "Customer tier not set"}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = CustomerTierSerializer(customer_tier)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    
+class GetShopCustomerTiersView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        shop_id = request.query_params.get("shop_id")
+        if not shop_id:
+            return Response({"error": "shop_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            shop = Shop.objects.get(id=shop_id)
+            # Optionally restrict to shop owner
+            if shop.owner != request.user:
+                return Response({"error": "You do not own this shop"}, status=status.HTTP_403_FORBIDDEN)
+        except Shop.DoesNotExist:
+            return Response({"error": "Shop not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        # Get all customer tiers for this shop
+        customer_tiers = CustomerTier.objects.filter(shop=shop).select_related('customer', 'tier', 'shop')
+
+        if not customer_tiers.exists():
+            return Response({"message": "No customers have tiers assigned for this shop yet"}, status=status.HTTP_200_OK)
+
+        # Prepare response data
+        response_data = []
+        for customer_tier in customer_tiers:
+            wallet = Wallet.objects.filter(customer=customer_tier.customer, shop=shop).first()
+            points = wallet.points if wallet else 0  # Fallback to 0 if no wallet exists
+
+            tier_data = {
+                "customer_id": customer_tier.customer.customer_id,
+                "tier": TierSerializer(customer_tier.tier).data if customer_tier.tier else None,
+                "points": points,
+                "updated_at": customer_tier.updated_at
+            }
+            response_data.append(tier_data)
+
+        return Response({
+            "shop_id": shop.id,
+            "shop_name": shop.name,
+            "customer_tiers": response_data
+        }, status=status.HTTP_200_OK)

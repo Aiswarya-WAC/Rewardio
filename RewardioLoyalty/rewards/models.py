@@ -7,7 +7,7 @@ from django.db import models
 from authentication.models import Shop
 from django.db import models
 from authentication.models import Shop
-
+from django.utils.timezone import now, timezone
 
 class PurchaseRule(models.Model):
     shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name='purchase_rules')
@@ -36,12 +36,15 @@ class CurrencyConversion(models.Model):
 
 class Customer(models.Model):
     shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name='customers')
-    customer_id = models.CharField(max_length=100, unique=True)
+    customer_id = models.CharField(max_length=100)
     created_at = models.DateTimeField(auto_now_add=True)
-
+    
+    class Meta:
+        unique_together = ('shop', 'customer_id')
+          
     def __str__(self):
         return self.customer_id
-    
+   
 
 class RewardCondition(models.Model):
     name = models.CharField(max_length=255, unique=True)  # e.g., "Birthday Reward", "Monthly Bonus"
@@ -61,20 +64,26 @@ class RewardType(models.Model):
     reward_name = models.CharField(max_length=255)
     description = models.TextField()
     condition = models.ForeignKey(RewardCondition, on_delete=models.CASCADE, related_name="reward_types")
+    has_expiring_points = models.BooleanField(default=False)  
+
 
     def __str__(self):
         return self.reward_name
     
-from django.utils.timezone import now
 
 class DirectReward(models.Model):
     shop = models.ForeignKey(Shop, on_delete=models.CASCADE)
-    reward_type = models.ForeignKey(RewardType, on_delete=models.CASCADE)
-    customer = models.ForeignKey(Customer, on_delete=models.CASCADE)
+    reward_type = models.ForeignKey('RewardType', on_delete=models.CASCADE)
+    customer = models.ForeignKey('Customer', on_delete=models.CASCADE)
     points = models.IntegerField()
-    redeemed_at = models.DateTimeField(auto_now_add=True)  # Existing field
+    expiry_date = models.DateField(null=True, blank=True)  
     created_at = models.DateTimeField(auto_now_add=True)
 
+    def is_expired(self):
+        return self.expiry_date and timezone.now().date() > self.expiry_date
+
+    def __str__(self):
+        return f"{self.customer} - {self.reward_type} - {self.points}"
 class Wallet(models.Model):
     customer = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name='wallets')
     shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name='wallets')
@@ -120,3 +129,38 @@ class WalletTransaction(models.Model):
 
     def __str__(self):
         return f"{self.points} points for {self.amount} - {self.description}"
+
+class Tier(models.Model):
+    shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name='tiers')
+    name = models.CharField(max_length=50, help_text="e.g., Bronze, Silver, Gold")
+    min_points = models.IntegerField(help_text="Minimum points to qualify for this tier")
+    max_points = models.IntegerField(help_text="Maximum points for this tier, inclusive")
+    description = models.TextField(blank=True, null=True, help_text="Description of tier benefits")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('shop', 'name') 
+        ordering = ['min_points']
+
+    def __str__(self):
+        return f"{self.name} ({self.min_points}-{self.max_points} points) - {self.shop.name}"
+
+class CustomerTier(models.Model):
+    customer = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name='tiers')
+    shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name='customer_tiers')
+    tier = models.ForeignKey(Tier, on_delete=models.SET_NULL, null=True, related_name='customers')
+    updated_at = models.DateTimeField(auto_now=True)
+    assigned_at = models.DateTimeField(auto_now_add=True)  # When the tier was assigned
+    expires_at = models.DateTimeField(null=True, blank=True)  # Tier expiration date
+    grace_period_expires_at = models.DateTimeField(null=True, blank=True)  # Grace period expiration
+    updated_at = models.DateTimeField(auto_now=True)
+    class Meta:
+        unique_together = ('customer', 'shop') 
+
+    def __str__(self):
+        return f"{self.customer.customer_id} - {self.tier.name if self.tier else 'No Tier'} at {self.shop.name}"
+
+    def is_in_grace_period(self):
+        now = timezone.now()
+        return self.grace_period_expires_at and now <= self.grace_period_expires_at

@@ -42,4 +42,9 @@ urlpatterns = [
     path('view-tansaction-details/',views.ViewWalletTransactionsView.as_view(), name ='view-transaction-details'),
     path('generate-code/', views.GenerateCodeView.as_view(), name='generate_code'),
     path('redeem-code/', views.RedeemCodeView.as_view(), name='redeem_code'),
+
+    path('set-tiers/', views.SetTierView.as_view(), name='set-tiers'),
+    path('update-customer-tier/', views.UpdateCustomerTierView.as_view(), name='update-customer-tier'),
+    path('get-customer-tier/', views.GetCustomerTierView.as_view(), name='get-customer-tier'),
+    path('get-shop-customer-tiers/', views.GetShopCustomerTiersView.as_view(), name='get-shop-customer-tiers'),
 ]
