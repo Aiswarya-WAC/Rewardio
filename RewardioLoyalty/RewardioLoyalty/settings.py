@@ -42,7 +42,7 @@ INSTALLED_APPS = [
     'rewards',
     'rest_framework', 
     'redeem',
-    'analytics'
+    'analytics',
     'voucher',
 ]
 
