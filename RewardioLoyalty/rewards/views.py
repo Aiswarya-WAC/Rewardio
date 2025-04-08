@@ -333,142 +333,288 @@ class RewardTypeView(APIView):
             return Response({"error": "Reward type not found"}, status=status.HTTP_404_NOT_FOUND)
 
 
+# class DirectRewardView(APIView):
+#     """API for assigning direct rewards to customers with various constraints."""
+#     permission_classes = [IsAuthenticated]
+
+#     def post(self, request):
+#         """Assign a direct reward and update wallet points with constraints."""
+#         shop_api_key = request.data.get("shop_api_key")
+#         reward_uuid = request.data.get("reward_uuid")
+#         customer_id = request.data.get("customer_id")
+#         points = int(request.data.get("points", 0))
+
+#         if not (shop_api_key and reward_uuid and customer_id and points > 0):
+#             return Response({"error": "Missing or invalid required fields"}, status=status.HTTP_400_BAD_REQUEST)
+
+#         try:
+#             shop = Shop.objects.get(api_key=shop_api_key)
+#         except Shop.DoesNotExist:
+#             return Response({"error": "Invalid shop API key"}, status=status.HTTP_404_NOT_FOUND)
+
+#         shop_limit, _ = ShopRewardLimit.objects.get_or_create(shop=shop)
+
+#         if shop_limit.used_points + points > shop_limit.max_points:
+#             return Response({"error": "Shop has reached its total reward limit."}, status=status.HTTP_400_BAD_REQUEST)
+
+#         try:
+#             reward_type = RewardType.objects.get(reward_uuid=reward_uuid)
+#             reward_condition = reward_type.condition
+#         except RewardType.DoesNotExist:
+#             return Response({"error": "Invalid reward UUID"}, status=status.HTTP_404_NOT_FOUND)
+
+#         customer, _ = Customer.objects.get_or_create(customer_id=customer_id, shop=shop)
+#         now = timezone.now()
+
+#         previous_rewards = DirectReward.objects.filter(
+#             customer=customer,
+#             shop=shop,
+#             reward_type=reward_type
+#         )
+
+#         def get_recurring_filter(recurring_type):
+#             """Generate filter for recurring reward conditions based on time period."""
+#             if recurring_type == "daily":
+#                 return Q(created_at__date=now.date())
+#             elif recurring_type == "weekly":
+#                 start = now - timedelta(days=now.weekday())
+#                 end = start + timedelta(days=6)
+#                 return Q(created_at__date__range=[start.date(), end.date()])
+#             elif recurring_type == "monthly":
+#                 return Q(created_at__year=now.year, created_at__month=now.month)
+#             elif recurring_type == "quarterly":
+#                 quarter = (now.month - 1) // 3 + 1
+#                 start_month = 3 * (quarter - 1) + 1
+#                 end_month = start_month + 2
+#                 return Q(created_at__year=now.year, created_at__month__range=(start_month, end_month))
+#             elif recurring_type == "bi_annual":
+#                 if now.month <= 6:
+#                     return Q(created_at__year=now.year, created_at__month__lte=6)
+#                 else:
+#                     return Q(created_at__year=now.year, created_at__month__gte=7)
+#             elif recurring_type == "yearly":
+#                 return Q(created_at__year=now.year)
+#             return Q()
+
+#         def get_next_recurring_eligible_date(recurring_type):
+#             """Calculate next eligible date for recurring rewards."""
+#             if recurring_type == "daily":
+#                 return (now + timedelta(days=1)).date()
+#             elif recurring_type == "weekly":
+#                 start_of_next_week = now + timedelta(days=(7 - now.weekday()))
+#                 return start_of_next_week.date()
+#             elif recurring_type == "monthly":
+#                 next_month = now.replace(day=1) + timedelta(days=32)
+#                 return next_month.replace(day=1).date()
+#             elif recurring_type == "quarterly":
+#                 current_quarter = (now.month - 1) // 3 + 1
+#                 next_quarter_start_month = 3 * current_quarter + 1
+#                 year = now.year + (1 if next_quarter_start_month > 12 else 0)
+#                 month = next_quarter_start_month if next_quarter_start_month <= 12 else next_quarter_start_month - 12
+#                 return timezone.datetime(year, month, 1).date()
+#             elif recurring_type == "bi_annual":
+#                 if now.month <= 6:
+#                     return timezone.datetime(now.year, 7, 1).date()
+#                 else:
+#                     return timezone.datetime(now.year + 1, 1, 1).date()
+#             elif recurring_type == "yearly":
+#                 return timezone.datetime(now.year + 1, 1, 1).date()
+#             return None
+
+#         recurring_filter = get_recurring_filter(reward_condition.recurring_type)
+#         recurring_count = previous_rewards.filter(recurring_filter).count()
+
+#         if reward_condition.recurring_type != "none" and recurring_count >= 1:
+#             next_eligible = get_next_recurring_eligible_date(reward_condition.recurring_type)
+#             return Response({
+#                 "error": f"{reward_condition.recurring_type.title()} reward already used.",
+#                 "next_eligible_date": str(next_eligible) if next_eligible else None
+#             }, status=status.HTTP_400_BAD_REQUEST)
+
+#         if reward_condition.max_usage_per_user:
+#             total_given = previous_rewards.count()
+#             if total_given >= reward_condition.max_usage_per_user:
+#                 return Response({"error": "Reward usage limit reached for this user."}, status=status.HTTP_400_BAD_REQUEST)
+
+#         if reward_condition.duration_days:
+#             recent = previous_rewards.order_by("-created_at").first()
+#             if recent and (now - recent.created_at).days < reward_condition.duration_days:
+#                 next_eligible = recent.created_at.date() + timedelta(days=reward_condition.duration_days)
+#                 return Response({
+#                     "error": f"Reward can be used only once in {reward_condition.duration_days} days.",
+#                     "next_eligible_date": str(next_eligible)
+#                 }, status=status.HTTP_400_BAD_REQUEST)
+
+#         with transaction.atomic():
+#             wallet, _ = Wallet.objects.get_or_create(customer=customer, shop=shop)
+#             wallet.points += points
+#             wallet.save()
+
+#             shop_limit.total_points_used += points
+#             shop_limit.used_points += points
+#             shop_limit.save()
+
+#             direct_reward = DirectReward.objects.create(
+#                 shop=shop,
+#                 reward_type=reward_type,
+#                 customer=customer,
+#                 points=points
+#             )
+
+#         serializer = DirectRewardSerializer(direct_reward)
+#         return Response({
+#             "reward": serializer.data,
+#             "wallet_balance": wallet.points,
+#             "shop_used_points": shop_limit.used_points,
+#             "total_points_used": shop_limit.total_points_used
+#         }, status=status.HTTP_201_CREATED)
+def process_external_payload(payload):
+    print(f"Processing external payload: {payload}")
+    return {"status": "Payload processed internally", "received_data": payload}
+
 class DirectRewardView(APIView):
-    """API for assigning direct rewards to customers with various constraints."""
-    permission_classes = [IsAuthenticated]
-
     def post(self, request):
-        """Assign a direct reward and update wallet points with constraints."""
-        shop_api_key = request.data.get("shop_api_key")
-        reward_uuid = request.data.get("reward_uuid")
-        customer_id = request.data.get("customer_id")
-        points = int(request.data.get("points", 0))
-
-        if not (shop_api_key and reward_uuid and customer_id and points > 0):
-            return Response({"error": "Missing or invalid required fields"}, status=status.HTTP_400_BAD_REQUEST)
-
         try:
-            shop = Shop.objects.get(api_key=shop_api_key)
-        except Shop.DoesNotExist:
-            return Response({"error": "Invalid shop API key"}, status=status.HTTP_404_NOT_FOUND)
+            shop_api_key = request.data.get("shop_api_key")
+            reward_uuid = request.data.get("reward_uuid")
+            customer_id = request.data.get("customer_id")
+            points = int(request.data.get("points", 0))
 
-        shop_limit, _ = ShopRewardLimit.objects.get_or_create(shop=shop)
+            if not (shop_api_key and reward_uuid and customer_id and points > 0):
+                return Response({"error": "Missing or invalid required fields"}, status=status.HTTP_400_BAD_REQUEST)
 
-        if shop_limit.used_points + points > shop_limit.max_points:
-            return Response({"error": "Shop has reached its total reward limit."}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                shop = Shop.objects.get(api_key=shop_api_key)
+            except Shop.DoesNotExist:
+                return Response({"error": "Invalid shop API key"}, status=status.HTTP_404_NOT_FOUND)
 
-        try:
-            reward_type = RewardType.objects.get(reward_uuid=reward_uuid)
-            reward_condition = reward_type.condition
-        except RewardType.DoesNotExist:
-            return Response({"error": "Invalid reward UUID"}, status=status.HTTP_404_NOT_FOUND)
+            shop_limit, _ = ShopRewardLimit.objects.get_or_create(shop=shop)
 
-        customer, _ = Customer.objects.get_or_create(customer_id=customer_id, shop=shop)
-        now = timezone.now()
+            if shop_limit.used_points + points > shop_limit.max_points:
+                return Response({"error": "Shop has reached its total reward limit."}, status=status.HTTP_400_BAD_REQUEST)
 
-        previous_rewards = DirectReward.objects.filter(
-            customer=customer,
-            shop=shop,
-            reward_type=reward_type
-        )
+            try:
+                reward_type = RewardType.objects.get(reward_uuid=reward_uuid)
+                reward_condition = reward_type.condition
+            except RewardType.DoesNotExist:
+                return Response({"error": "Invalid reward UUID"}, status=status.HTTP_404_NOT_FOUND)
 
-        def get_recurring_filter(recurring_type):
-            """Generate filter for recurring reward conditions based on time period."""
-            if recurring_type == "daily":
-                return Q(created_at__date=now.date())
-            elif recurring_type == "weekly":
-                start = now - timedelta(days=now.weekday())
-                end = start + timedelta(days=6)
-                return Q(created_at__date__range=[start.date(), end.date()])
-            elif recurring_type == "monthly":
-                return Q(created_at__year=now.year, created_at__month=now.month)
-            elif recurring_type == "quarterly":
-                quarter = (now.month - 1) // 3 + 1
-                start_month = 3 * (quarter - 1) + 1
-                end_month = start_month + 2
-                return Q(created_at__year=now.year, created_at__month__range=(start_month, end_month))
-            elif recurring_type == "bi_annual":
-                if now.month <= 6:
-                    return Q(created_at__year=now.year, created_at__month__lte=6)
-                else:
-                    return Q(created_at__year=now.year, created_at__month__gte=7)
-            elif recurring_type == "yearly":
-                return Q(created_at__year=now.year)
-            return Q()
+            customer, _ = Customer.objects.get_or_create(customer_id=customer_id)
+            now = timezone.now()
 
-        def get_next_recurring_eligible_date(recurring_type):
-            """Calculate next eligible date for recurring rewards."""
-            if recurring_type == "daily":
-                return (now + timedelta(days=1)).date()
-            elif recurring_type == "weekly":
-                start_of_next_week = now + timedelta(days=(7 - now.weekday()))
-                return start_of_next_week.date()
-            elif recurring_type == "monthly":
-                next_month = now.replace(day=1) + timedelta(days=32)
-                return next_month.replace(day=1).date()
-            elif recurring_type == "quarterly":
-                current_quarter = (now.month - 1) // 3 + 1
-                next_quarter_start_month = 3 * current_quarter + 1
-                year = now.year + (1 if next_quarter_start_month > 12 else 0)
-                month = next_quarter_start_month if next_quarter_start_month <= 12 else next_quarter_start_month - 12
-                return timezone.datetime(year, month, 1).date()
-            elif recurring_type == "bi_annual":
-                if now.month <= 6:
-                    return timezone.datetime(now.year, 7, 1).date()
-                else:
-                    return timezone.datetime(now.year + 1, 1, 1).date()
-            elif recurring_type == "yearly":
-                return timezone.datetime(now.year + 1, 1, 1).date()
-            return None
-
-        recurring_filter = get_recurring_filter(reward_condition.recurring_type)
-        recurring_count = previous_rewards.filter(recurring_filter).count()
-
-        if reward_condition.recurring_type != "none" and recurring_count >= 1:
-            next_eligible = get_next_recurring_eligible_date(reward_condition.recurring_type)
-            return Response({
-                "error": f"{reward_condition.recurring_type.title()} reward already used.",
-                "next_eligible_date": str(next_eligible) if next_eligible else None
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        if reward_condition.max_usage_per_user:
-            total_given = previous_rewards.count()
-            if total_given >= reward_condition.max_usage_per_user:
-                return Response({"error": "Reward usage limit reached for this user."}, status=status.HTTP_400_BAD_REQUEST)
-
-        if reward_condition.duration_days:
-            recent = previous_rewards.order_by("-created_at").first()
-            if recent and (now - recent.created_at).days < reward_condition.duration_days:
-                next_eligible = recent.created_at.date() + timedelta(days=reward_condition.duration_days)
-                return Response({
-                    "error": f"Reward can be used only once in {reward_condition.duration_days} days.",
-                    "next_eligible_date": str(next_eligible)
-                }, status=status.HTTP_400_BAD_REQUEST)
-
-        with transaction.atomic():
-            wallet, _ = Wallet.objects.get_or_create(customer=customer, shop=shop)
-            wallet.points += points
-            wallet.save()
-
-            shop_limit.total_points_used += points
-            shop_limit.used_points += points
-            shop_limit.save()
-
-            direct_reward = DirectReward.objects.create(
-                shop=shop,
-                reward_type=reward_type,
+            previous_rewards = DirectReward.objects.filter(
                 customer=customer,
-                points=points
+                shop=shop,
+                reward_type=reward_type
             )
 
-        serializer = DirectRewardSerializer(direct_reward)
-        return Response({
-            "reward": serializer.data,
-            "wallet_balance": wallet.points,
-            "shop_used_points": shop_limit.used_points,
-            "total_points_used": shop_limit.total_points_used
-        }, status=status.HTTP_201_CREATED)
+            def get_recurring_filter(recurring_type):
+                if recurring_type == "daily":
+                    return Q(created_at__date=now.date())
+                elif recurring_type == "weekly":
+                    start = now - timedelta(days=now.weekday())
+                    end = start + timedelta(days=6)
+                    return Q(created_at__date__range=[start.date(), end.date()])
+                elif recurring_type == "monthly":
+                    return Q(created_at__year=now.year, created_at__month=now.month)
+                elif recurring_type == "quarterly":
+                    quarter = (now.month - 1) // 3 + 1
+                    start_month = 3 * (quarter - 1) + 1
+                    end_month = start_month + 2
+                    return Q(created_at__year=now.year, created_at__month__range=(start_month, end_month))
+                elif recurring_type == "bi_annual":
+                    if now.month <= 6:
+                        return Q(created_at__year=now.year, created_at__month__lte=6)
+                    else:
+                        return Q(created_at__year=now.year, created_at__month__gte=7)
+                elif recurring_type == "yearly":
+                    return Q(created_at__year=now.year)
+                return Q()
 
+            def get_next_recurring_eligible_date(recurring_type):
+                if recurring_type == "daily":
+                    return (now + timedelta(days=1)).date()
+                elif recurring_type == "weekly":
+                    start_of_next_week = now + timedelta(days=(7 - now.weekday()))
+                    return start_of_next_week.date()
+                elif recurring_type == "monthly":
+                    next_month = now.replace(day=1) + timedelta(days=32)
+                    return next_month.replace(day=1).date()
+                elif recurring_type == "quarterly":
+                    current_quarter = (now.month - 1) // 3 + 1
+                    next_quarter_start_month = 3 * current_quarter + 1
+                    year = now.year + (1 if next_quarter_start_month > 12 else 0)
+                    month = next_quarter_start_month if next_quarter_start_month <= 12 else next_quarter_start_month - 12
+                    return timezone.datetime(year, month, 1).date()
+                elif recurring_type == "bi_annual":
+                    if now.month <= 6:
+                        return timezone.datetime(now.year, 7, 1).date()
+                    else:
+                        return timezone.datetime(now.year + 1, 1, 1).date()
+                elif recurring_type == "yearly":
+                    return timezone.datetime(now.year + 1, 1, 1).date()
+                return None
+
+            recurring_filter = get_recurring_filter(reward_condition.recurring_type)
+            recurring_count = previous_rewards.filter(recurring_filter).count()
+
+            if reward_condition.recurring_type != "none" and recurring_count >= 1:
+                next_eligible = get_next_recurring_eligible_date(reward_condition.recurring_type)
+                return Response({
+                    "error": f"{reward_condition.recurring_type.title()} reward already used.",
+                    "next_eligible_date": str(next_eligible) if next_eligible else None
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            if reward_condition.max_usage_per_user:
+                total_given = previous_rewards.count()
+                if total_given >= reward_condition.max_usage_per_user:
+                    return Response({"error": "Reward usage limit reached for this user."}, status=status.HTTP_400_BAD_REQUEST)
+
+            if reward_condition.duration_days:
+                recent = previous_rewards.order_by("-created_at").first()
+                if recent and (now - recent.created_at).days < reward_condition.duration_days:
+                    next_eligible = recent.created_at.date() + timedelta(days=reward_condition.duration_days)
+                    return Response({
+                        "error": f"Reward can be used only once in {reward_condition.duration_days} days.",
+                        "next_eligible_date": str(next_eligible)
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+            with transaction.atomic():
+                wallet, _ = Wallet.objects.get_or_create(customer=customer, shop=shop)
+                wallet.points += points  # Reverted to points
+                wallet.save()
+
+                shop_limit.total_points_used += points
+                shop_limit.used_points += points
+                shop_limit.save()
+
+                direct_reward = DirectReward.objects.create(
+                    shop=shop,
+                    reward_type=reward_type,
+                    customer=customer,
+                    points=points
+                )
+
+            serializer = DirectRewardSerializer(direct_reward)
+            payload = request.data.copy()
+            payload['business_name'] = "Nike"
+            payload['wallet_balance'] = wallet.points  # Reverted to points
+            payload['shop_used_points'] = shop_limit.used_points
+            payload['total_points_used'] = shop_limit.total_points_used
+
+            external_result = process_external_payload(payload)
+            print(f"Internal processing result: {external_result}")
+
+            return Response({
+                "reward": serializer.data,
+                "wallet_balance": wallet.points,  # Reverted to points
+                "shop_used_points": shop_limit.used_points,
+                "total_points_used": shop_limit.total_points_used
+            }, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            print(f"Error in DirectRewardView: {e}")
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class SetShopRewardLimitView(APIView):
     """API for managing shop reward point limits."""

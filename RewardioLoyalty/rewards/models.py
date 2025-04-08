@@ -103,8 +103,6 @@ class ShopRewardLimit(models.Model):
 # ___________________________________________________ rewards wallet section ________________________________________
 
 
-
-
 class WalletTransaction(models.Model):
     wallet = models.ForeignKey(Wallet, on_delete=models.CASCADE, related_name='transactions')
     amount = models.DecimalField(max_digits=10, decimal_places=2)
