@@ -8,12 +8,16 @@ from .analytics import (
     points_summary, points_expiration, retention_rate, top_customers,
     points_over_time, customer_activity_trends, purchase_rule_utilization, churn_risk , customer_segmentation
 )
+from django.db.models import Sum, Count
 from django.db.models import Sum
-from rewards.models import Shop, Wallet, WalletTransaction, DirectReward, PurchaseRule, CurrencyConversion, ShopRewardLimit
+from rewards.models import Shop, Wallet, WalletTransaction, DirectReward, PurchaseRule, CurrencyConversion, ShopRewardLimit,Tier, CustomerTier
 from .serializers import (
     ShopSerializer, PurchaseRuleSerializer, CurrencyConversionSerializer, 
-    ShopRewardLimitSerializer, DirectRewardSerializer, WalletTransactionSerializer
+    ShopRewardLimitSerializer, DirectRewardSerializer, WalletTransactionSerializer,TierSerializer
 )
+from django.shortcuts import render
+
+
 class VendorAnalyticsView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -51,8 +55,6 @@ class VendorAnalyticsView(APIView):
 # -----------------------------------------------------------dashboard section ----------------------------------------------------------------------------------
 
 
-
-
 class VendorDashboardView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -64,18 +66,14 @@ class VendorDashboardView(APIView):
         except ValueError:
             return Response({"error": "Invalid shop_id"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Check permission
         if shop.owner != request.user:
             return Response({"error": "You do not have permission to view this shop's dashboard"}, status=status.HTTP_403_FORBIDDEN)
 
-        # Shop Details
         shop_details = ShopSerializer(shop).data
 
-        # Shop Maximum Points
         reward_limit = ShopRewardLimit.objects.filter(shop=shop).first()
         max_points = reward_limit.max_points if reward_limit else None
 
-        # Used Points
         wallets = Wallet.objects.filter(shop=shop)
         total_points_issued = (
             (WalletTransaction.objects.filter(wallet__in=wallets).aggregate(Sum('points'))['points__sum'] or 0) +
@@ -83,22 +81,23 @@ class VendorDashboardView(APIView):
         )
         total_points_redeemed = WalletTransaction.objects.filter(wallet__in=wallets, is_redeemed=True).aggregate(Sum('points'))['points__sum'] or 0
 
-        # Currency Details
         currency_conversion = CurrencyConversion.objects.filter(shop=shop).first()
         currency_details = CurrencyConversionSerializer(currency_conversion).data if currency_conversion else None
 
-        # Shop Purchase Rules
         purchase_rules = PurchaseRule.objects.filter(shop=shop)
         purchase_rules_data = PurchaseRuleSerializer(purchase_rules, many=True).data
 
-        # Direct Rewards Assigned
         direct_rewards = DirectReward.objects.filter(shop=shop)
         direct_rewards_data = DirectRewardSerializer(direct_rewards, many=True).data
         total_direct_points = sum(dr.points for dr in direct_rewards)
 
-        # Recent Transactions (optional bonus)
-        recent_transactions = WalletTransaction.objects.filter(wallet__in=wallets).order_by('-created_at')[:5]
+        tiers = Tier.objects.filter(shop=shop)
+        tiers_data = TierSerializer(tiers, many=True).data
 
+        customer_tier_summary = CustomerTier.objects.filter(shop=shop).values('tier__name').annotate(
+            customer_count=Count('customer')
+        ).order_by('tier__min_points')
+        
         return Response({
             "shop_details": shop_details,
             "maximum_points": max_points,
@@ -112,5 +111,20 @@ class VendorDashboardView(APIView):
                 "list": direct_rewards_data,
                 "total_direct_points": total_direct_points
             },
-
+            "shop_tiers": {
+                "list": tiers_data,
+                "customer_summary": [
+                    {"tier_name": summary['tier__name'], "customer_count": summary['customer_count']}
+                    for summary in customer_tier_summary
+                ] if customer_tier_summary else []
+            },
         }, status=status.HTTP_200_OK)
+        
+        
+# ------------------------------------------------------------front end view -----------------------------------------------------------------------------------------
+
+
+
+class DashboardFrontendView(APIView):
+    def get(self, request):
+        return render(request, 'index.html')

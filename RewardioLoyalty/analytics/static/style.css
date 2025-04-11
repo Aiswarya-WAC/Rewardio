@@ -1,0 +1,44 @@
+body {
+    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+header {
+    background: linear-gradient(90deg, #007bff, #00b4db);
+    border-radius: 0 0 10px 10px;
+}
+.card {
+    border: none;
+    border-radius: 10px;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+.card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.15) !important;
+}
+.nav-tabs .nav-link {
+    border-radius: 5px 5px 0 0;
+    color: #007bff;
+}
+.nav-tabs .nav-link.active {
+    background: #007bff;
+    color: white;
+}
+.table {
+    margin-bottom: 0;
+    background: #fff;
+    border-radius: 5px;
+}
+.table th {
+    background: #f8f9fa;
+    color: #333;
+}
+.btn-primary {
+    background: linear-gradient(90deg, #007bff, #00b4db);
+    border: none;
+}
+.btn-primary:hover {
+    background: linear-gradient(90deg, #0056b3, #008bb0);
+}
+canvas {
+    max-height: 300px;
+}

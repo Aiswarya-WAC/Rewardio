@@ -1,6 +1,6 @@
 # vendor_dashboard/serializers.py
 from rest_framework import serializers
-from rewards.models import Shop, WalletTransaction, DirectReward, PurchaseRule, CurrencyConversion, ShopRewardLimit
+from rewards.models import Shop, WalletTransaction, DirectReward, PurchaseRule, CurrencyConversion, ShopRewardLimit, Tier
 
 class ShopSerializer(serializers.ModelSerializer):
     class Meta:
@@ -9,13 +9,9 @@ class ShopSerializer(serializers.ModelSerializer):
 
 class PurchaseRuleSerializer(serializers.ModelSerializer):
     redeemable_shops = serializers.SlugRelatedField(many=True, read_only=True, slug_field='name')
-
     class Meta:
         model = PurchaseRule
-        fields = [
-            'id', 'min_purchase_amount', 'max_purchase_amount', 'points', 
-            'redeemable', 'expiration_days', 'discount_percentage', 'redeemable_shops'
-        ]
+        fields = ['id', 'min_purchase_amount', 'max_purchase_amount', 'points', 'redeemable', 'expiration_days', 'discount_percentage', 'redeemable_shops']
 
 class CurrencyConversionSerializer(serializers.ModelSerializer):
     class Meta:
@@ -29,7 +25,6 @@ class ShopRewardLimitSerializer(serializers.ModelSerializer):
 
 class WalletTransactionSerializer(serializers.ModelSerializer):
     redeemed_at_shop_name = serializers.CharField(source='redeemed_at_shop.name', read_only=True, allow_null=True)
-
     class Meta:
         model = WalletTransaction
         fields = ['id', 'amount', 'points', 'redeemable', 'code', 'is_redeemed', 'redeemed_at_shop_name', 'description', 'created_at']
@@ -37,7 +32,11 @@ class WalletTransactionSerializer(serializers.ModelSerializer):
 class DirectRewardSerializer(serializers.ModelSerializer):
     shop_name = serializers.CharField(source='shop.name', read_only=True)
     reward_type_name = serializers.CharField(source='reward_type.reward_name', read_only=True)
-
     class Meta:
         model = DirectReward
         fields = ['id', 'points', 'shop_name', 'reward_type_name', 'created_at', 'redeemed_at']
+
+class TierSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Tier
+        fields = ['id', 'name', 'min_points', 'max_points', 'description']
