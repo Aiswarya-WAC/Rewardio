@@ -72,8 +72,8 @@ class RewardType(models.Model):
 
 class DirectReward(models.Model):
     shop = models.ForeignKey(Shop, on_delete=models.CASCADE)
-    reward_type = models.ForeignKey('RewardType', on_delete=models.CASCADE)
-    customer = models.ForeignKey('Customer', on_delete=models.CASCADE)
+    reward_type = models.ForeignKey(RewardType, on_delete=models.CASCADE)
+    customer = models.ForeignKey(Customer, on_delete=models.CASCADE)
     points = models.IntegerField()
     expiry_date = models.DateField(null=True, blank=True)  
     created_at = models.DateTimeField(auto_now_add=True)
