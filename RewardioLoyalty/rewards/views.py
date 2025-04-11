@@ -1,25 +1,16 @@
 from datetime import datetime, timedelta
 import random
 import string
-from django.db import transaction
 import uuid
-import requests
 from django.db import transaction
 from django.db.models import Count, Q
 from django.utils import timezone
 from django.utils.timezone import now
-from django.db.models.query import QuerySet  # Correct import for QuerySet
+from django.db.models.query import QuerySet 
 from rest_framework import permissions, status
-from rest_framework.views import APIView
-from .models import Customer, Wallet, WalletTransaction, DirectReward
-from .serializers import WalletTransactionSerializer, DirectRewardSerializer  # Assuming serializers are in serializers.py
-
-from rest_framework import status, permissions
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from . import models 
-from django.db.models.query import QuerySet
 from authentication.models import Shop
 from .models import (
     PurchaseRule, CurrencyConversion, RewardCondition, RewardType, 
@@ -388,7 +379,7 @@ class DirectRewardView(APIView):
         reward_uuid = request.data.get("reward_uuid")
         customer_id = request.data.get("customer_id")
         points = int(request.data.get("points", 0))
-        expiry_date_str = request.data.get("expiry_date")  # Expecting 'YYYY-MM-DD'
+        expiry_date_str = request.data.get("expiry_date") 
 
         if not (shop_api_key and reward_uuid and customer_id and points > 0):
             return Response({"error": "Missing or invalid required fields"}, status=status.HTTP_400_BAD_REQUEST)
@@ -631,6 +622,8 @@ class GetAllRulesView(APIView):
 
 
 class ProcessPurchaseWalletView(APIView):
+    permission_classes = [IsAuthenticated]
+
     def generate_code(self, wallet_tx):
         if wallet_tx.code or not wallet_tx.redeemable:
             return None
@@ -643,10 +636,13 @@ class ProcessPurchaseWalletView(APIView):
         customer_id = request.data.get("customer_id")
         api_key = request.data.get("api_key")
         amount = request.data.get("amount")
+        shop_id = request.query_params.get("shop_id")
 
+        # Validate required fields
         if not all([customer_id, api_key, amount]):
             return Response({"error": "customer_id, api_key, and amount are required"}, status=400)
 
+        # Validate amount
         try:
             amount = float(amount)
             if amount <= 0:
@@ -659,22 +655,25 @@ class ProcessPurchaseWalletView(APIView):
         except Shop.DoesNotExist:
             return Response({"error": "Invalid API key"}, status=401)
 
+        if shop.owner != request.user:
+            return Response(
+                {"error": "You do not have permission to process purchases for this shop"},
+                status=403
+            )
+
         with transaction.atomic():
-            # Get or create a Customer instance specific to this shop-customer pair
             customer, created = Customer.objects.get_or_create(
                 customer_id=customer_id,
                 shop=shop,
-                defaults={"shop": shop}  # Redundant but ensures clarity
+                defaults={"shop": shop}
             )
 
-            # Get or create a Wallet for this customer-shop pair
             wallet, created = Wallet.objects.get_or_create(
                 customer=customer,
                 shop=shop,
                 defaults={"points": 0}
             )
 
-            # Fetch applicable purchase rule
             purchase_rule = PurchaseRule.objects.filter(
                 shop=shop,
                 min_purchase_amount__lte=amount,
@@ -687,16 +686,13 @@ class ProcessPurchaseWalletView(APIView):
             expiration_days = purchase_rule.expiration_days if purchase_rule else None
             redeemable_shops = [shop.name for shop in purchase_rule.redeemable_shops.all()] if purchase_rule and redeemable else []
 
-            # Update wallet points
             wallet.points += points
             wallet.save()
 
-            # Set expiration date if applicable
             expires_at = None
             if expiration_days is not None:
                 expires_at = timezone.now() + timedelta(days=expiration_days)
 
-            # Create wallet transaction
             wallet_tx = WalletTransaction.objects.create(
                 wallet=wallet,
                 amount=amount,
@@ -706,14 +702,12 @@ class ProcessPurchaseWalletView(APIView):
                 expires_at=expires_at
             )
 
-            # Generate code if redeemable
             code = None
             if redeemable:
                 code = self.generate_code(wallet_tx)
                 if not code:
                     return Response({"error": "Failed to generate code"}, status=500)
 
-    # Update customer tier
             update_tier_data = {"customer_id": customer_id, "shop_id": shop.id}
             update_tier_view = UpdateCustomerTierView()
             update_response = update_tier_view.post(
@@ -727,9 +721,11 @@ class ProcessPurchaseWalletView(APIView):
                 "shop_id": shop.id,
                 "code": code,
                 "status": "not_redeemed" if code else None,
-                "redeemable_shops": redeemable_shops,  
+                "redeemable_shops": redeemable_shops,
                 "tier_info": tier_data
             }, status=200)
+            
+            
 class ViewWalletTransactionsView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -738,22 +734,20 @@ class ViewWalletTransactionsView(APIView):
         if not customer_id:
             return Response({"error": "customer_id is required"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Ensure customers is a queryset
         customers = Customer.objects.filter(customer_id=customer_id)
-        if not isinstance(customers, QuerySet):  # Corrected to use QuerySet from django.db.models.query
+        if not isinstance(customers, QuerySet):
             return Response({"error": "Internal error: customers is not a queryset"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         if not customers.exists():
             return Response({"error": "No customers found for this customer_id"}, status=status.HTTP_404_NOT_FOUND)
 
-        # Debug: Print the customers queryset
         print(f"Customers: {list(customers)}")
 
-        wallets = Wallet.objects.filter(customer__in=customers)
-        direct_rewards = DirectReward.objects.filter(customer__in=customers)
+        wallets = Wallet.objects.filter(customer__in=customers, shop__owner=request.user)
+        direct_rewards = DirectReward.objects.filter(customer__in=customers, shop__owner=request.user)
 
         if not wallets.exists() and not direct_rewards.exists():
-            return Response({"error": "No wallets or direct rewards found"}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"error": "No wallets or direct rewards found for your shops"}, status=status.HTTP_404_NOT_FOUND)
 
         wallet_transactions = WalletTransaction.objects.filter(wallet__in=wallets)
         wallet_serializer = WalletTransactionSerializer(wallet_transactions, many=True)
@@ -767,7 +761,7 @@ class ViewWalletTransactionsView(APIView):
         }, status=status.HTTP_200_OK)
             
             
-# ___________________________________________________Multi shop section   ________________________________________
+# _______________________________________________________________Multi shop section   ____________________________________________________________________________________
 
 
 class GenerateCodeView(APIView):
@@ -898,12 +892,26 @@ class CentralizedWalletView(APIView):
 
     def get(self, request):
         customer_id = request.query_params.get("customer_id")
+        shop_id = request.query_params.get("shop_id")
+
         if not customer_id:
             return Response({"error": "customer_id is required"}, status=400)
 
-        customers = Customer.objects.filter(customer_id=customer_id)
+        # Get customers with the given customer_id, filtered by shops owned by the user
+        customers = Customer.objects.filter(customer_id=customer_id, shop__owner=request.user)
         if not customers.exists():
-            return Response({"error": "Customer not found"}, status=404)
+            return Response({"error": "No customers found for this customer_id in your shops"}, status=404)
+
+        # If shop_id is provided, validate it belongs to the user
+        if shop_id:
+            try:
+                shop = Shop.objects.get(id=shop_id, owner=request.user)
+                # Further filter customers to this specific shop
+                customers = customers.filter(shop=shop)
+                if not customers.exists():
+                    return Response({"error": "Customer not found in the specified shop"}, status=404)
+            except Shop.DoesNotExist:
+                return Response({"error": "Shop not found or you do not have permission"}, status=404)
 
         total_transaction_points = 0
         total_direct_reward_points = 0
@@ -911,6 +919,7 @@ class CentralizedWalletView(APIView):
         current_time = timezone.now()
 
         for customer in customers:
+            # Filter wallets and direct rewards to shops owned by the user (already filtered by customers)
             wallets = Wallet.objects.filter(customer=customer)
             direct_rewards = DirectReward.objects.filter(customer=customer)
 

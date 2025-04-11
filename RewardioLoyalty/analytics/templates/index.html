@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vendor Dashboard & Analytics</title>
+    {% load static %}
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'style.css' %}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="container-fluid">
+        <header class="bg-primary text-white p-3 mb-4 shadow-sm">
+            <h1 class="h3">Vendor Dashboard & Analytics</h1>
+        </header>
+        <div class="row justify-content-center mb-4">
+            <div class="col-md-6">
+                <div class="card shadow-sm p-3">
+                    <div class="row g-2">
+                        <div class="col">
+                            <label for="shop_id" class="form-label">Shop ID</label>
+                            <input type="number" class="form-control" id="shop_id" value="1">
+                        </div>
+                        <div class="col">
+                            <label for="token" class="form-label">Auth Token</label>
+                            <input type="text" class="form-control" id="token" placeholder="Enter your token">
+                        </div>
+                        <div class="col-auto align-self-end">
+                            <button class="btn btn-primary" onclick="fetchData()">Load Data</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-12">
+                <ul class="nav nav-tabs mb-3" id="dashboardTabs" role="tablist">
+                    <li class="nav-item">
+                        <a class="nav-link active" id="analytics-tab" data-bs-toggle="tab" href="#analytics" role="tab">Analytics</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" id="dashboard-tab" data-bs-toggle="tab" href="#dashboard" role="tab">Dashboard</a>
+                    </li>
+                </ul>
+                <div class="tab-content">
+                    <!-- Analytics Tab -->
+                    <div class="tab-pane fade show active" id="analytics" role="tabpanel">
+                        <div class="row g-3">
+                            <div class="col-md-4"><div class="card shadow-sm p-3" id="points-analytics"></div></div>
+                            <div class="col-md-4"><div class="card shadow-sm p-3" id="expiration-rate"></div></div>
+                            <div class="col-md-4"><div class="card shadow-sm p-3" id="retention-rate"></div></div>
+                            <div class="col-md-6"><div class="card shadow-sm p-3" id="top-customers"></div></div>
+                            <div class="col-md-6"><div class="card shadow-sm p-3" id="customer-segment"></div></div>
+                            <div class="col-12"><div class="card shadow-sm p-3" id="time-analytics">
+                                <canvas id="points-over-time-chart"></canvas>
+                                <canvas id="activity-trends-chart"></canvas>
+                            </div></div>
+                            <div class="col-md-6"><div class="card shadow-sm p-3" id="purchase-rules"></div></div>
+                            <div class="col-md-6"><div class="card shadow-sm p-3" id="churn-risk"></div></div>
+                        </div>
+                    </div>
+                    <!-- Dashboard Tab -->
+                    <div class="tab-pane fade" id="dashboard" role="tabpanel">
+                        <div class="row g-3">
+                            <div class="col-md-4"><div class="card shadow-sm p-3" id="shop-details"></div></div>
+                            <div class="col-md-4"><div class="card shadow-sm p-3" id="max-points"></div></div>
+                            <div class="col-md-4"><div class="card shadow-sm p-3" id="used-points"></div></div>
+                            <div class="col-md-4"><div class="card shadow-sm p-3" id="currency-details"></div></div>
+                            <div class="col-md-8"><div class="card shadow-sm p-3" id="purchase-rules-dash"></div></div>
+                            <div class="col-md-6"><div class="card shadow-sm p-3" id="direct-rewards"></div></div>
+                            <div class="col-md-6"><div class="card shadow-sm p-3" id="shop-tiers"></div></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{% static 'script.js' %}"></script>
+</body>
+</html>

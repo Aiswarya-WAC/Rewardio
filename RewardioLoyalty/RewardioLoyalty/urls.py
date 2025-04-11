@@ -23,6 +23,7 @@ urlpatterns = [
     path('api/',include('authentication.urls')),
     path('',include('redeem.urls')),
     path('',include('customer.urls')),
+    path('analytics/',include('analytics.urls')),
     path('',include('voucher.urls')),
     path('',include('user_management.urls')),
 ]
