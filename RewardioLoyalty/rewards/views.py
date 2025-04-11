@@ -14,7 +14,7 @@ from rest_framework.views import APIView
 from authentication.models import Shop
 from .models import (
     PurchaseRule, CurrencyConversion, RewardCondition, RewardType, 
-    DirectReward, Customer, Wallet, WalletTransaction, ShopRewardLimit,Tier, CustomerTier
+    DirectReward, Customer, Wallet, WalletTransaction, ShopRewardLimit,Tier,CustomerTier
 )
 from .serializers import (
     PurchaseRuleSerializer, CurrencyConversionSerializer, 
