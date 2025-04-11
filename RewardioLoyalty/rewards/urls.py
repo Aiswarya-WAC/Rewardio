@@ -21,6 +21,8 @@ urlpatterns = [
     # Currency Conversion
     path('create-currency-conversion/', CreateAndUpdateCurrencyConversionView.as_view(), name='create-currency-conversion'),
     path('update-currency-conversion/<int:conversion_id>/', CreateAndUpdateCurrencyConversionView.as_view(), name='update-currency-conversion'),
+    path('delete-currency-conversion/<int:conversion_id>/', CreateAndUpdateCurrencyConversionView.as_view()),
+
 
      # Reward Conditions
     path('reward-conditions/', RewardConditionView.as_view(), name='reward-conditions'),

@@ -24,4 +24,5 @@ urlpatterns = [
     path('',include('redeem.urls')),
     path('',include('customer.urls')),
     path('',include('voucher.urls')),
+    path('',include('user_management.urls')),
 ]

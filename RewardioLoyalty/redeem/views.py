@@ -2,9 +2,10 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from rewards.models import Customer, Wallet, CurrencyConversion
+from rewards.models import Customer, Wallet, CurrencyConversion, WalletTransaction
 from authentication.models import Shop
 from django.shortcuts import get_object_or_404
+from django.db import transaction  # For atomic transactions
 import math  # For rounding
 
 def process_external_payload(payload):
@@ -96,12 +97,23 @@ class DeductPointsView(APIView):
             deducted_cart_amount = cart_amount - deducted_amount
 
             # Deduct points
-            wallet.points -= points
-            wallet.save()
+            with transaction.atomic():
+                wallet.points -= points
+                wallet.save()
+
+                # Log the redemption in WalletTransaction
+                redemption_tx = WalletTransaction.objects.create(
+                    wallet=wallet,
+                    amount=deducted_amount,
+                    points=-points,  # Negative points to indicate deduction
+                    redeemable=False,
+                    is_redeemed=True,  # Mark as redeemed
+                    description=f"Points redeemed: {points} for {deducted_amount} {currency_code}",
+                    redeemed_at_shop=shop  # Explicitly set the shop where points were redeemed
+                )
 
             # Prepare payload with hardcoded business_name and calculated values
             payload = request.data.copy()
-            payload['business_name'] = "Nike"
             payload['deducted_amount'] = deducted_amount
             payload['deducted_cart_amount'] = deducted_cart_amount
 
@@ -118,16 +130,14 @@ class DeductPointsView(APIView):
                 "points_deducted": points,
                 "deducted_amount": deducted_amount,
                 "deducted_cart_amount": deducted_cart_amount,
-                "remaining_points": wallet.points
+                "remaining_points": wallet.points,
+                "transaction_id": redemption_tx.id  # Return the transaction ID for reference
             }, status=status.HTTP_200_OK)
 
         except Shop.DoesNotExist:
             return Response({"error": "Invalid shop_api_key"}, status=status.HTTP_404_NOT_FOUND)
-        except Customer.DoesNotExist:
-            return Response({"error": "Customer not found"}, status=status.HTTP_404_NOT_FOUND)
-        except Wallet.DoesNotExist:
-            return Response({"error": "Wallet not found for this customer and shop"}, status=status.HTTP_404_NOT_FOUND)
         except CurrencyConversion.DoesNotExist:
             return Response({"error": f"Currency conversion not found for {currency_code} in this shop"}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            

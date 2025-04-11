@@ -3,6 +3,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 import requests
+from rest_framework.permissions import IsAuthenticated
 
 
 
@@ -14,7 +15,7 @@ class TriggerDeductPointsView(APIView):
             "customer_id": "cust-001",
             "currency_code": "INR",
             "cart_amount": "2500",
-            "shop_api_key": "1a0788b4-3117-46b9-85f2-1fe15e79197c",
+            "shop_api_key": "9d12ac21c5d34645a44b24cffd4cd778",
             "points": 20
         }
 
@@ -31,12 +32,14 @@ class TriggerDeductPointsView(APIView):
 #----- Direct Reward Payload -------#
 
 class TriggerDirectRewardView(APIView):
+    #permission_classes = [IsAuthenticated]
     def post(self, request):
         payload = {
-            "shop_api_key": "2cb17347-5a21-40f5-a882-96fc743ce219",
-            "reward_uuid": "6a873418-a7ec-46ca-8a0f-434ca490527b",
-            "customer_id": "cust-001",
-            "points": 10
+            "shop_api_key": "12d06523-323c-4d3b-9b72-fad4975e5364",
+            "reward_uuid": "484dd10d-bcf5-4e5f-a123-3a970ca9c56f",
+            "customer_id": "cust-55",
+            "points": 100,
+            "expiry_date": "2026-12-31", 
         }
         try:
             response = requests.post(
@@ -62,8 +65,8 @@ class TriggerProcessPurchaseWalletView(APIView):
     def post(self, request):
         payload = {
             "customer_id": "newcust1",  # Consistent with previous triggers
-            "api_key": "7b290d19-5c24-47af-a8f4-0e87b070d928",  # Same shop API key
-            "amount": "100.00"  # Purchase amount to trigger points
+            "api_key": "12d06523-323c-4d3b-9b72-fad4975e5364",  # Same shop API key
+            "amount": "2200.00"  # Purchase amount to trigger points
         }
         try:
             response = requests.post(
