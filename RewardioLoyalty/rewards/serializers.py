@@ -85,7 +85,7 @@ class DirectRewardSerializer(serializers.ModelSerializer):
         fields = ['id', 'reward_type', 'shop', 'customer', 'points', 'created_at', 'expiry_date']
 
 
-# ___________________________________________________ rewards wallet section ________________________________________
+# _______________________________________________________________ rewards wallet section _________________________________________________________________________________
 
 
 class WalletTransactionSerializer(serializers.ModelSerializer):

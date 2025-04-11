@@ -7,6 +7,7 @@ from django.db import models
 from authentication.models import Shop
 from django.utils.timezone import now, timezone
 
+
 class PurchaseRule(models.Model):
     shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name='purchase_rules')
     min_purchase_amount = models.DecimalField(max_digits=10, decimal_places=2)
@@ -56,8 +57,9 @@ class RewardCondition(models.Model):
     def __str__(self):
         return self.name
     
+    
 class RewardType(models.Model):
-    reward_uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)  # Auto-generated UUID
+    reward_uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
     reward_name = models.CharField(max_length=255)
     description = models.TextField()
     condition = models.ForeignKey(RewardCondition, on_delete=models.CASCADE, related_name="reward_types")
@@ -81,6 +83,8 @@ class DirectReward(models.Model):
 
     def __str__(self):
         return f"{self.customer} - {self.reward_type} - {self.points}"
+    
+    
 class Wallet(models.Model):
     customer = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name='wallets')
     shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name='wallets')
@@ -140,7 +144,6 @@ class Tier(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.min_points}-{self.max_points} points) - {self.shop.name}"
-
 class CustomerTier(models.Model):
     customer = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name='tiers')
     shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name='customer_tiers')
