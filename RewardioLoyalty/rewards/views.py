@@ -204,16 +204,41 @@ class CreateAndUpdateCurrencyConversionView(APIView):
     """API endpoints for managing currency conversion rules for points calculation."""
     permission_classes = [permissions.IsAuthenticated]
 
-    def post(self, request):
-        """Create a new currency conversion rule for a shop."""
-        shop_id = request.data.get("shop_id")
+    def get(self, request):
+        """Retrieve all currency conversion rules for a specific shop."""
+        shop_id = request.query_params.get("shop_id")
+        if not shop_id:
+            return Response({"error": "shop_id is required as a query parameter"}, status=status.HTTP_400_BAD_REQUEST)
+
         try:
             shop = Shop.objects.get(id=shop_id)
         except Shop.DoesNotExist:
             return Response({"error": "Shop not found"}, status=status.HTTP_404_NOT_FOUND)
 
+        conversions = CurrencyConversion.objects.filter(shop=shop)
+        serializer = CurrencyConversionSerializer(conversions, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        """Create a new currency conversion rule for a shop."""
+        shop_id = request.data.get("shop_id")
+        currency = request.data.get("currency")
+
+        try:
+            shop = Shop.objects.get(id=shop_id)
+        except Shop.DoesNotExist:
+            return Response({"error": "Shop not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        if CurrencyConversion.objects.filter(shop=shop, currency=currency).exists():
+            return Response(
+                {"error": f"A currency conversion rule for '{currency}' already exists for this shop."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         currency_conversion = CurrencyConversion.objects.create(
-            shop=shop, currency=request.data.get("currency"), points_per_currency=request.data.get("points_per_currency")
+            shop=shop,
+            currency=currency,
+            points_per_currency=request.data.get("points_per_currency")
         )
         return Response(CurrencyConversionSerializer(currency_conversion).data, status=status.HTTP_201_CREATED)
 
@@ -228,6 +253,17 @@ class CreateAndUpdateCurrencyConversionView(APIView):
         currency_conversion.points_per_currency = request.data.get("points_per_currency", currency_conversion.points_per_currency)
         currency_conversion.save()
         return Response(CurrencyConversionSerializer(currency_conversion).data, status=status.HTTP_200_OK)
+
+    def delete(self, request, conversion_id):
+        """Delete a specific currency conversion rule."""
+        try:
+            currency_conversion = CurrencyConversion.objects.get(id=conversion_id)
+        except CurrencyConversion.DoesNotExist:
+            return Response({"error": "Currency Conversion not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        currency_conversion.delete()
+        return Response({"message": "Currency Conversion deleted successfully."}, status=status.HTTP_200_OK)
+
 
 # --------------------------------------------------------------currency section end ---------------------------------------------------------------------------------
 
@@ -336,7 +372,7 @@ def process_external_payload(payload):
     return {"status": "Payload processed internally", "received_data": payload}
 
 class DirectRewardView(APIView):
-    permission_classes = [IsAuthenticated]
+    #permission_classes = [IsAuthenticated]
 
     def post(self, request):
         shop_api_key = request.data.get("shop_api_key")
@@ -437,15 +473,19 @@ class DirectRewardView(APIView):
                     "next_eligible_date": str(next_eligible)
                 }, status=status.HTTP_400_BAD_REQUEST)
 
-        # Handle expiry date
+        # Handle expiry date based on reward_type.has_expiring_points
         expiry_date = None
-        if expiry_date_str:  # Simplified check; make optional unless reward_type.has_expiring_points exists
-            try:
-                expiry_date = datetime.strptime(expiry_date_str, "%Y-%m-%d").date()
-                if expiry_date <= now.date():
-                    return Response({"error": "Expiry date must be in the future."}, status=status.HTTP_400_BAD_REQUEST)
-            except ValueError:
-                return Response({"error": "Invalid expiry_date format. Use YYYY-MM-DD."}, status=status.HTTP_400_BAD_REQUEST)
+        if reward_type.has_expiring_points:  # Assuming has_expiring_points is a boolean field in RewardType
+            if expiry_date_str:
+                try:
+                    expiry_date = datetime.strptime(expiry_date_str, "%Y-%m-%d").date()
+                    if expiry_date <= now.date():
+                        return Response({"error": "Expiry date must be in the future."}, status=status.HTTP_400_BAD_REQUEST)
+                except ValueError:
+                    return Response({"error": "Invalid expiry_date format. Use YYYY-MM-DD."}, status=status.HTTP_400_BAD_REQUEST)
+        elif expiry_date_str:
+            # If has_expiring_points is False and vendor provided an expiry date, ignore it
+            expiry_date = None  # Explicitly set to None to ignore provided expiry_date
 
         with transaction.atomic():
             wallet, _ = Wallet.objects.get_or_create(
@@ -465,7 +505,7 @@ class DirectRewardView(APIView):
                 reward_type=reward_type,
                 customer=customer,
                 points=points,
-                expiry_date=expiry_date
+                expiry_date=expiry_date  # Will be None if has_expiring_points is False
             )
 
             # Update customer tier
@@ -976,6 +1016,20 @@ class ShopBasedWalletView(APIView):
 # -------------------------------------------------------------wallet section end----------------------------------------------------------------------------------
 
 # ------------------------------------------------------------- Tier section start----------------------------------------------------------------------------------
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status, permissions
+from django.db import transaction
+from .models import Shop, Tier
+from .serializers import TierSerializer
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status, permissions
+from django.db import transaction
+from .models import Shop, Tier
+from .serializers import TierSerializer
+
 class SetTierView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -985,9 +1039,7 @@ class SetTierView(APIView):
 
         if not shop_id:
             return Response({"error": "shop_id is required"}, status=status.HTTP_400_BAD_REQUEST)
-        if not tiers:
-            return Response({"error": "tiers is required in the request body"}, status=status.HTTP_400_BAD_REQUEST)
-        if not isinstance(tiers, list) or not tiers:
+        if not tiers or not isinstance(tiers, list):
             return Response({"error": "tiers must be a non-empty list"}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
@@ -1023,14 +1075,10 @@ class SetTierView(APIView):
                         status=status.HTTP_400_BAD_REQUEST
                     )
 
-                overlapping = Tier.objects.filter(
-                    shop=shop,
-                    min_points__lt=max_points,
-                    max_points__gt=min_points
-                )
-                if overlapping.exists():
+                # Check for duplicate tier name (even though we delete, just to be safe)
+                if Tier.objects.filter(shop=shop, name=name).exists():
                     return Response(
-                        {"error": f"Tier {name} overlaps with existing tiers"},
+                        {"error": f"Tier with name '{name}' already exists for this shop"},
                         status=status.HTTP_400_BAD_REQUEST
                     )
 
@@ -1044,6 +1092,90 @@ class SetTierView(APIView):
 
             serializer = TierSerializer(Tier.objects.filter(shop=shop), many=True)
             return Response({"tiers": serializer.data}, status=status.HTTP_201_CREATED)
+
+    def put(self, request):
+        tier_id = request.data.get("tier_id")
+        name = request.data.get("name")
+        min_points = request.data.get("min_points")
+        max_points = request.data.get("max_points")
+        description = request.data.get("description", "")
+
+        if not tier_id:
+            return Response({"error": "tier_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+        if not all([name, min_points is not None, max_points is not None]):
+            return Response({"error": "name, min_points, and max_points are required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            min_points = int(min_points)
+            max_points = int(max_points)
+            if min_points < 0 or max_points < 0 or min_points >= max_points:
+                return Response({"error": "Invalid point range"}, status=status.HTTP_400_BAD_REQUEST)
+        except (ValueError, TypeError):
+            return Response({"error": "min_points and max_points must be integers"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            tier = Tier.objects.get(id=tier_id)
+            if tier.shop.owner != request.user:
+                return Response({"error": "You do not own this shop"}, status=status.HTTP_403_FORBIDDEN)
+        except Tier.DoesNotExist:
+            return Response({"error": "Tier not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        # Check if another tier in the same shop has the same name
+        if Tier.objects.filter(shop=tier.shop, name=name).exclude(id=tier_id).exists():
+            return Response(
+                {"error": f"Another tier with name '{name}' already exists in this shop"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Check for overlapping points range
+        if Tier.objects.filter(
+            shop=tier.shop,
+            min_points__lt=max_points,
+            max_points__gt=min_points
+        ).exclude(id=tier_id).exists():
+            return Response(
+                {"error": "This point range overlaps with another tier"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        tier.name = name
+        tier.min_points = min_points
+        tier.max_points = max_points
+        tier.description = description
+        tier.save()
+
+        return Response({"message": "Tier updated successfully"}, status=status.HTTP_200_OK)
+
+    def get(self, request):
+        shop_id = request.query_params.get("shop_id")
+        if not shop_id:
+            return Response({"error": "shop_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            shop = Shop.objects.get(id=shop_id)
+            if shop.owner != request.user:
+                return Response({"error": "You do not own this shop"}, status=status.HTTP_403_FORBIDDEN)
+        except Shop.DoesNotExist:
+            return Response({"error": "Shop not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        tiers = Tier.objects.filter(shop=shop)
+        serializer = TierSerializer(tiers, many=True)
+        return Response({"tiers": serializer.data}, status=status.HTTP_200_OK)
+
+    def delete(self, request):
+        tier_id = request.data.get("tier_id")
+        if not tier_id:
+            return Response({"error": "tier_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            tier = Tier.objects.get(id=tier_id)
+            if tier.shop.owner != request.user:
+                return Response({"error": "You do not own this shop"}, status=status.HTTP_403_FORBIDDEN)
+            tier.delete()
+            return Response({"message": "Tier deleted successfully"}, status=status.HTTP_200_OK)
+        except Tier.DoesNotExist:
+            return Response({"error": "Tier not found"}, status=status.HTTP_404_NOT_FOUND)
+
 
 
 class UpdateCustomerTierView(APIView):

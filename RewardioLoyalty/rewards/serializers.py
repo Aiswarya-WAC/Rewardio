@@ -118,7 +118,7 @@ class WalletTransactionSerializer(serializers.ModelSerializer):
 class TierSerializer(serializers.ModelSerializer):
     class Meta:
         model = Tier
-        fields = ['id', 'name', 'min_points', 'max_points', 'description', 'shop', 'created_at', 'updated_at']
+        fields = ['id', 'name', 'description']
         read_only_fields = ['shop', 'created_at', 'updated_at']
 
 class CustomerTierSerializer(serializers.ModelSerializer):
